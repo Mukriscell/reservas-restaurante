@@ -37,6 +37,8 @@ MESALISTA es una página web donde los clientes de un restaurante reservan su me
   - `Accesibilidad` — reservas que requieren espacio accesible.
   - `Tarifas` — referencia de precios.
 
+  Ejemplo de planilla generada: [`docs/reservastest.xlsx`](docs/reservastest.xlsx).
+
 ## Stack
 
 - **Next.js 15** (App Router) · **TypeScript** · **TailwindCSS**
