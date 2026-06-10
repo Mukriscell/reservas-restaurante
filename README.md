@@ -64,7 +64,33 @@ src/
     types.ts       → tipos de dominio
 ```
 
-## Cómo correr (desarrollo)
+## Ejecutar desde Visual Studio Code
+
+Requisitos: [Node.js 20+](https://nodejs.org) y [Visual Studio Code](https://code.visualstudio.com).
+
+1. Clona el repositorio y ábrelo en VS Code:
+
+   ```bash
+   git clone https://github.com/Mukriscell/reservas-restaurante.git
+   cd reservas-restaurante
+   code .
+   ```
+
+2. Abre la terminal integrada (**Ctrl+`**) e instala las dependencias:
+
+   ```bash
+   npm install   # o `pnpm install` si usas pnpm
+   ```
+
+3. Presiona **F5** (configuración *MESALISTA: iniciar y abrir en el navegador*): arranca el servidor de desarrollo y se abre <http://localhost:3000> solo. Equivale a correr `npm run dev` en la terminal.
+
+4. Prueba la página:
+   - <http://localhost:3000> — completa el formulario y envía una reserva.
+   - <http://localhost:3000/admin> — revisa la reserva en el panel y descarga la planilla con **Exportar a Excel**.
+
+> `.vscode/launch.json` trae una segunda configuración, *MESALISTA: debug full stack (Chrome)*, que permite poner breakpoints tanto en el código del servidor como del navegador.
+
+## Cómo correr (terminal)
 
 Requisitos: Node 20+, pnpm 9+.
 
