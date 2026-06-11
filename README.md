@@ -68,21 +68,18 @@ y celulares.
 
 Requisitos: el navegador ofrece la instalación cuando la página se sirve por
 **HTTPS** (o desde `http://localhost` en el mismo computador). Para instalarla
-en celulares u otros equipos, publica la app en un servicio con HTTPS — por
-ejemplo [Vercel](https://vercel.com) (`npx vercel`), Railway o Render — y abre
-esa URL desde cada dispositivo.
-
-> Nota: las reservas se guardan en `data/reservas.json` en el servidor. En
-> plataformas *serverless* (como Vercel) el sistema de archivos no es
-> persistente; para producción usa un servicio con disco persistente o cambia
-> `src/lib/db.ts` a una base de datos (la interfaz ya lo permite).
+en celulares u otros equipos, despliega la app en Railway (ver
+[Desplegar en Railway](#desplegar-en-railway)) y abre esa URL desde cada
+dispositivo.
 
 ## Stack
 
 - **Next.js 15** (App Router) · **TypeScript** · **TailwindCSS**
 - **Zod** para validación del contrato del formulario (front ↔ API)
 - **ExcelJS** para la generación de las planillas
-- Persistencia en archivo JSON (`data/reservas.json`) tras una interfaz de repositorio, intercambiable por Prisma/PostgreSQL sin tocar el resto de la app.
+- **Firebase Firestore** como base de datos (SDK Admin en el servidor), con
+  respaldo en archivo JSON local (`data/reservas.json`) para desarrollar sin
+  credenciales — ambas detrás de la misma interfaz de repositorio en `src/lib/db.ts`.
 
 ## Estructura
 
@@ -169,3 +166,43 @@ curl -sL -o reservas.xlsx localhost:3000/api/reservas/export
 pnpm build
 pnpm start
 ```
+
+## Base de datos en Firebase (Firestore)
+
+Las reservas se guardan en la colección `reservas` de Firestore cuando la app
+encuentra credenciales en el entorno. Configuración (una sola vez):
+
+1. En [Firebase Console](https://console.firebase.google.com): **Agregar proyecto** (ej. `mesalista`).
+2. **Compilación → Firestore Database → Crear base de datos**, en modo
+   producción y la ubicación más cercana (p. ej. `southamerica-west1`).
+3. **Configuración del proyecto (⚙️) → Cuentas de servicio → Generar nueva
+   clave privada** → descarga un archivo `.json`. **No lo subas al repositorio.**
+4. Entrega la credencial por variable de entorno (ver `.env.example`):
+   - `FIREBASE_SERVICE_ACCOUNT` = contenido completo del `.json`, **o**
+   - `FIREBASE_PROJECT_ID` + `FIREBASE_CLIENT_EMAIL` + `FIREBASE_PRIVATE_KEY`.
+
+Los navegadores nunca tocan Firestore: solo el servidor accede con el SDK
+Admin, así que puedes dejar las reglas de seguridad de Firestore **cerradas**
+(denegar lecturas y escrituras de clientes).
+
+Sin credenciales, la app funciona igual guardando en `data/reservas.json`
+(solo desarrollo). Para probar contra el emulador oficial:
+`FIRESTORE_EMULATOR_HOST=localhost:8080 pnpm start`.
+
+## Desplegar en Railway
+
+El repo incluye `railway.json` con el build y el arranque ya configurados.
+
+1. Crea tu cuenta en [railway.com](https://railway.com) (entra con GitHub).
+2. **New Project → Deploy from GitHub repo** → elige
+   `Mukriscell/reservas-restaurante` (rama `main`). Railway detecta
+   Next.js + pnpm y compila automáticamente.
+3. En el servicio → pestaña **Variables** → agrega
+   `FIREBASE_SERVICE_ACCOUNT` con el contenido del `.json` de la cuenta de
+   servicio (pégalo tal cual).
+4. **Settings → Networking → Generate Domain** → obtienes tu URL pública
+   `https://….up.railway.app`.
+
+La URL es HTTPS, así que desde ella la PWA se puede **instalar en cualquier
+celular o computador**. Cada `git push` a `main` vuelve a desplegar
+automáticamente.

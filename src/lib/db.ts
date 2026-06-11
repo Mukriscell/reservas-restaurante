@@ -6,11 +6,91 @@ import type { CrearReservaInput } from "./validation";
 import type { Reserva } from "./types";
 
 /**
- * Persistencia simple en archivo JSON (data/reservas.json).
+ * Persistencia de reservas tras una interfaz de repositorio.
  *
- * Suficiente para un MVP de un solo proceso; la interfaz del repositorio
- * permite cambiar a Prisma/PostgreSQL sin tocar el resto de la app.
+ *  - Firestore (Firebase): se activa cuando hay credenciales en el
+ *    entorno (FIREBASE_SERVICE_ACCOUNT, o FIREBASE_PROJECT_ID +
+ *    FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY) o cuando se usa el
+ *    emulador (FIRESTORE_EMULATOR_HOST). Es el modo de producción.
+ *  - Archivo JSON local (data/reservas.json): respaldo para desarrollo
+ *    sin configurar Firebase.
  */
+
+interface RepositorioReservas {
+  listar(): Promise<Reserva[]>;
+  guardar(reserva: Reserva): Promise<void>;
+}
+
+/* ----------------------------- Firestore ------------------------------ */
+
+const COLECCION = "reservas";
+
+function credencialesFirebase() {
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    return JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT) as {
+      project_id: string;
+      client_email: string;
+      private_key: string;
+    };
+  }
+  const { FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY } =
+    process.env;
+  if (FIREBASE_PROJECT_ID && FIREBASE_CLIENT_EMAIL && FIREBASE_PRIVATE_KEY) {
+    return {
+      project_id: FIREBASE_PROJECT_ID,
+      client_email: FIREBASE_CLIENT_EMAIL,
+      // En paneles como Railway la clave suele pegarse con \n literales.
+      private_key: FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    };
+  }
+  return null;
+}
+
+function usaFirestore(): boolean {
+  return Boolean(
+    credencialesFirebase() || process.env.FIRESTORE_EMULATOR_HOST
+  );
+}
+
+async function repoFirestore(): Promise<RepositorioReservas> {
+  const { initializeApp, getApps, cert } = await import("firebase-admin/app");
+  const { getFirestore } = await import("firebase-admin/firestore");
+
+  if (getApps().length === 0) {
+    const cred = credencialesFirebase();
+    if (cred) {
+      initializeApp({
+        credential: cert({
+          projectId: cred.project_id,
+          clientEmail: cred.client_email,
+          privateKey: cred.private_key,
+        }),
+        projectId: cred.project_id,
+      });
+    } else {
+      // Emulador: no requiere credenciales.
+      initializeApp({
+        projectId: process.env.FIREBASE_PROJECT_ID ?? "demo-mesalista",
+      });
+    }
+  }
+
+  const db = getFirestore();
+  return {
+    async listar() {
+      const snapshot = await db.collection(COLECCION).get();
+      return snapshot.docs.map((doc) => doc.data() as Reserva);
+    },
+    async guardar(reserva) {
+      // Firestore no acepta undefined; serializar lo descarta, igual
+      // que hacía el archivo JSON con los campos opcionales vacíos.
+      const limpia = JSON.parse(JSON.stringify(reserva)) as Reserva;
+      await db.collection(COLECCION).doc(reserva.id).set(limpia);
+    },
+  };
+}
+
+/* ------------------------- Archivo JSON local ------------------------- */
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const DB_FILE = path.join(DATA_DIR, "reservas.json");
@@ -18,7 +98,7 @@ const DB_FILE = path.join(DATA_DIR, "reservas.json");
 // Serializa las escrituras concurrentes dentro del proceso.
 let writeLock: Promise<unknown> = Promise.resolve();
 
-async function leerTodas(): Promise<Reserva[]> {
+async function leerArchivo(): Promise<Reserva[]> {
   try {
     const raw = await fs.readFile(DB_FILE, "utf-8");
     return JSON.parse(raw) as Reserva[];
@@ -28,8 +108,47 @@ async function leerTodas(): Promise<Reserva[]> {
   }
 }
 
+const repoJson: RepositorioReservas = {
+  listar: leerArchivo,
+  async guardar(reserva) {
+    const operacion = writeLock.then(async () => {
+      await fs.mkdir(DATA_DIR, { recursive: true });
+      const reservas = await leerArchivo();
+      reservas.push(reserva);
+      await fs.writeFile(DB_FILE, JSON.stringify(reservas, null, 2), "utf-8");
+    });
+    writeLock = operacion.catch(() => undefined);
+    await operacion;
+  },
+};
+
+/* ----------------------------- Selección ------------------------------ */
+
+let repo: Promise<RepositorioReservas> | null = null;
+let avisado = false;
+
+function getRepo(): Promise<RepositorioReservas> {
+  if (!repo) {
+    if (usaFirestore()) {
+      repo = repoFirestore();
+    } else {
+      if (!avisado) {
+        avisado = true;
+        console.warn(
+          "[MESALISTA] Sin credenciales de Firebase: usando data/reservas.json " +
+            "(configura FIREBASE_SERVICE_ACCOUNT para usar Firestore)."
+        );
+      }
+      repo = Promise.resolve(repoJson);
+    }
+  }
+  return repo;
+}
+
+/* ------------------------------- API ---------------------------------- */
+
 export async function listarReservas(): Promise<Reserva[]> {
-  const reservas = await leerTodas();
+  const reservas = await (await getRepo()).listar();
   // Más recientes primero por fecha/hora de la reserva.
   return reservas.sort((a, b) =>
     `${b.fecha} ${b.hora}`.localeCompare(`${a.fecha} ${a.hora}`)
@@ -54,14 +173,6 @@ export async function crearReserva(input: CrearReservaInput): Promise<Reserva> {
     abono: input.abono,
     totalEstimado: calcularTotal(input),
   };
-
-  const operacion = writeLock.then(async () => {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    const reservas = await leerTodas();
-    reservas.push(reserva);
-    await fs.writeFile(DB_FILE, JSON.stringify(reservas, null, 2), "utf-8");
-    return reserva;
-  });
-  writeLock = operacion.catch(() => undefined);
-  return operacion;
+  await (await getRepo()).guardar(reserva);
+  return reserva;
 }

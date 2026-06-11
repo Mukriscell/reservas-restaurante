@@ -8,9 +8,12 @@ out/
 # datos locales (reservas guardadas)
 data/*.json
 
-# entorno
+# entorno y credenciales
 .env
 .env.local
+*serviceaccount*.json
+*service-account*.json
+.firebase/
 
 # misc
 *.log
