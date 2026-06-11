@@ -1,7 +1,14 @@
 import ExcelJS from "exceljs";
-import { getMenu, formatCLP, PRECIO_NINO_6_11, PRECIO_NINO_3_5 } from "./menu";
+import {
+  getMenu,
+  formatCLP,
+  PRECIO_NINO_6_11,
+  PRECIO_NINO_3_5,
+  PERSONAS_ABONO_OBLIGATORIO,
+} from "./menu";
 import { MENUS } from "./menu";
 import { SALONES, SIN_SALON } from "./salones";
+import { ALMUERZO, CENA, DIAS_ATENCION, servicioParaReserva } from "./horarios";
 import type { Reserva } from "./types";
 
 /**
@@ -11,6 +18,8 @@ import type { Reserva } from "./types";
  *  - "Todas las Reservas": tabla completa.
  *  - Una hoja por salón (incluye "Sin preferencia").
  *  - Una hoja por tipo de menú.
+ *  - "Almuerzo" y "Cena": según el servicio al que ingresa la mesa.
+ *  - "Con abono": mesas que dejaron abono (con su saldo pendiente).
  *  - "Accesibilidad": reservas que indicaron asistente con discapacidad.
  */
 
@@ -19,6 +28,7 @@ const COLUMNS: Partial<ExcelJS.Column>[] = [
   { header: "Teléfono", key: "telefono", width: 16 },
   { header: "Fecha", key: "fecha", width: 12 },
   { header: "Hora", key: "hora", width: 8 },
+  { header: "Servicio", key: "servicio", width: 11 },
   { header: "Adultos", key: "adultos", width: 9 },
   { header: "Niños 6-11", key: "ninos6a11", width: 11 },
   { header: "Niños 3-5", key: "ninos3a5", width: 10 },
@@ -28,6 +38,8 @@ const COLUMNS: Partial<ExcelJS.Column>[] = [
   { header: "Accesibilidad", key: "accesibilidad", width: 13 },
   { header: "Detalles adicionales", key: "detalles", width: 45 },
   { header: "Total estimado (CLP)", key: "totalEstimado", width: 20 },
+  { header: "Abono (CLP)", key: "abono", width: 13 },
+  { header: "Saldo pendiente (CLP)", key: "saldo", width: 20 },
   { header: "Creada en", key: "creadaEn", width: 20 },
 ];
 
@@ -59,6 +71,7 @@ function agregarHoja(
       telefono: r.telefono ?? "",
       fecha: r.fecha,
       hora: r.hora,
+      servicio: servicioParaReserva(r.fecha, r.hora)?.nombre ?? "—",
       adultos: r.adultos,
       ninos6a11: r.ninos6a11,
       ninos3a5: r.ninos3a5,
@@ -68,11 +81,15 @@ function agregarHoja(
       accesibilidad: r.accesibilidad ? "Sí" : "No",
       detalles: r.detalles,
       totalEstimado: r.totalEstimado,
+      abono: r.abono,
+      saldo: r.totalEstimado - r.abono,
       creadaEn: new Date(r.creadaEn).toLocaleString("es-CL"),
     });
   }
 
   sheet.getColumn("totalEstimado").numFmt = '"$"#,##0';
+  sheet.getColumn("abono").numFmt = '"$"#,##0';
+  sheet.getColumn("saldo").numFmt = '"$"#,##0';
 
   if (reservas.length > 0) {
     const totalRow = sheet.addRow({
@@ -85,6 +102,8 @@ function agregarHoja(
         0
       ),
       totalEstimado: reservas.reduce((s, r) => s + r.totalEstimado, 0),
+      abono: reservas.reduce((s, r) => s + r.abono, 0),
+      saldo: reservas.reduce((s, r) => s + r.totalEstimado - r.abono, 0),
     });
     totalRow.font = { bold: true };
   }
@@ -124,7 +143,25 @@ export async function generarExcelReservas(
     );
   }
 
-  // 4. Reservas con accesibilidad
+  // 4. Dividido por servicio (almuerzo / cena)
+  for (const servicio of [ALMUERZO, CENA]) {
+    agregarHoja(
+      workbook,
+      servicio.nombre,
+      reservas.filter(
+        (r) => servicioParaReserva(r.fecha, r.hora)?.id === servicio.id
+      )
+    );
+  }
+
+  // 5. Mesas que dejaron abono (10+ personas es obligatorio)
+  agregarHoja(
+    workbook,
+    "Con abono",
+    reservas.filter((r) => r.abono > 0)
+  );
+
+  // 6. Reservas con accesibilidad
   agregarHoja(
     workbook,
     "Accesibilidad",
@@ -143,6 +180,29 @@ export async function generarExcelReservas(
   }
   precios.addRow({ concepto: "Niños 6 a 11 años (buffet)", precio: formatCLP(PRECIO_NINO_6_11) });
   precios.addRow({ concepto: "Niños 3 a 5 años (buffet)", precio: formatCLP(PRECIO_NINO_3_5) });
+  precios.addRow({});
+  precios.addRow({
+    concepto: `Abono obligatorio para mesas de ${PERSONAS_ABONO_OBLIGATORIO} o más personas`,
+    precio: "Se descuenta del total",
+  });
+
+  // Hoja de horarios de ingreso
+  const horarios = workbook.addWorksheet("Horarios");
+  horarios.columns = [
+    { header: "Día", key: "dia", width: 12 },
+    { header: "Almuerzo (ingreso)", key: "almuerzo", width: 22 },
+    { header: "Cena (ingreso)", key: "cena", width: 22 },
+  ];
+  horarios.getRow(1).font = { bold: true };
+  for (const dia of DIAS_ATENCION) {
+    const almuerzo = dia.servicios.find((s) => s.id === "ALMUERZO");
+    const cena = dia.servicios.find((s) => s.id === "CENA");
+    horarios.addRow({
+      dia: dia.nombre,
+      almuerzo: almuerzo ? `${almuerzo.desde} a ${almuerzo.hasta}` : "—",
+      cena: cena ? `${cena.desde} a ${cena.hasta}` : "—",
+    });
+  }
 
   const arrayBuffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(arrayBuffer);

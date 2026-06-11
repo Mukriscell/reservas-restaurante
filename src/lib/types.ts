@@ -16,5 +16,6 @@ export interface Reserva {
   salon?: Salon;
   accesibilidad: boolean;
   detalles: string;
+  abono: number; // CLP abonado al reservar; se descuenta del total de la cuenta
   totalEstimado: number; // CLP
 }

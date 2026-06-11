@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { MENU_IDS } from "./menu";
+import { MENU_IDS, PERSONAS_ABONO_OBLIGATORIO, calcularTotal } from "./menu";
 import { SALONES } from "./salones";
+import { nombreDia, serviciosParaFecha, servicioParaReserva } from "./horarios";
 
 /** Contrato de creación de reserva (formulario público → API). */
 export const crearReservaSchema = z
@@ -33,10 +34,51 @@ export const crearReservaSchema = z
     salon: z.enum(SALONES).optional(),
     accesibilidad: z.boolean().default(false),
     detalles: z.string().trim().max(1000, "Máximo 1000 caracteres").default(""),
+    abono: z.coerce
+      .number()
+      .int("El abono debe ser un monto entero en pesos")
+      .min(0, "El abono no puede ser negativo")
+      .default(0),
   })
   .refine((data) => data.adultos + data.ninos6a11 + data.ninos3a5 > 0, {
     message: "La reserva debe incluir al menos una persona",
     path: ["adultos"],
+  })
+  .superRefine((data, ctx) => {
+    // Día y horario de ingreso del restaurante.
+    const servicios = serviciosParaFecha(data.fecha);
+    if (servicios.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["fecha"],
+        message: `Recibimos reservas solo viernes, sábado y domingo (el ${data.fecha} es ${nombreDia(data.fecha)})`,
+      });
+    } else if (!servicioParaReserva(data.fecha, data.hora)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["hora"],
+        message: `El ${nombreDia(data.fecha)} el ingreso es: ${servicios
+          .map((s) => `${s.nombre.toLowerCase()} de ${s.desde} a ${s.hasta}`)
+          .join(" y ")}`,
+      });
+    }
+
+    // Abono: obligatorio desde 10 personas; nunca mayor al total estimado.
+    const personas = data.adultos + data.ninos6a11 + data.ninos3a5;
+    if (personas >= PERSONAS_ABONO_OBLIGATORIO && data.abono <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["abono"],
+        message: `Las mesas de ${PERSONAS_ABONO_OBLIGATORIO} o más personas deben dejar un abono al reservar`,
+      });
+    }
+    if (data.abono > calcularTotal(data)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["abono"],
+        message: "El abono no puede superar el total estimado de la cuenta",
+      });
+    }
   });
 
 export type CrearReservaInput = z.infer<typeof crearReservaSchema>;

@@ -5,11 +5,14 @@ import {
   Accessibility,
   CalendarDays,
   CheckCircle2,
+  Clock,
   Loader2,
   Users,
+  Wallet,
 } from "lucide-react";
 import {
   MENUS,
+  PERSONAS_ABONO_OBLIGATORIO,
   PRECIO_NINO_3_5,
   PRECIO_NINO_6_11,
   calcularTotal,
@@ -17,6 +20,18 @@ import {
   type MenuId,
 } from "@/lib/menu";
 import { SALONES, type Salon } from "@/lib/salones";
+import {
+  DIAS_ATENCION,
+  horasDeIngreso,
+  serviciosParaFecha,
+} from "@/lib/horarios";
+
+const HORARIOS_TEXTO = DIAS_ATENCION.map(
+  (d) =>
+    `${d.nombre} ${d.servicios
+      .map((s) => `${s.nombre.toLowerCase()} ${s.desde}–${s.hasta}`)
+      .join(" y ")}`
+).join(" · ");
 
 interface FormState {
   nombreEncargado: string;
@@ -30,6 +45,7 @@ interface FormState {
   salon: Salon | "";
   accesibilidad: boolean;
   detalles: string;
+  abono: number;
 }
 
 const initialState: FormState = {
@@ -44,6 +60,7 @@ const initialState: FormState = {
   salon: "",
   accesibilidad: false,
   detalles: "",
+  abono: 0,
 };
 
 export default function ReservaPage() {
@@ -64,6 +81,10 @@ export default function ReservaPage() {
   );
 
   const totalPersonas = form.adultos + form.ninos6a11 + form.ninos3a5;
+  const abonoObligatorio = totalPersonas >= PERSONAS_ABONO_OBLIGATORIO;
+  const saldoPendiente = Math.max(total - form.abono, 0);
+  const serviciosDia = form.fecha ? serviciosParaFecha(form.fecha) : [];
+  const fechaSinAtencion = form.fecha !== "" && serviciosDia.length === 0;
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -105,6 +126,14 @@ export default function ReservaPage() {
           <strong>{form.nombreEncargado}</strong> para {totalPersonas}{" "}
           {totalPersonas === 1 ? "persona" : "personas"} el {form.fecha} a las{" "}
           {form.hora}. Total estimado: <strong>{formatCLP(total)}</strong>.
+          {form.abono > 0 && (
+            <>
+              {" "}
+              Abono registrado: <strong>{formatCLP(form.abono)}</strong> ·
+              saldo a pagar en el restaurante:{" "}
+              <strong>{formatCLP(saldoPendiente)}</strong>.
+            </>
+          )}
         </p>
         <button
           className="mt-6 rounded-lg bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-700"
@@ -173,24 +202,60 @@ export default function ReservaPage() {
                     className="input"
                     required
                     value={form.fecha}
-                    onChange={(e) => set("fecha", e.target.value)}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        fecha: e.target.value,
+                        hora: "",
+                      }))
+                    }
                   />
                 </div>
                 <div>
                   <label className="label" htmlFor="hora">
-                    Hora *
+                    Hora de ingreso *
                   </label>
-                  <input
+                  <select
                     id="hora"
-                    type="time"
                     className="input"
                     required
+                    disabled={!form.fecha || fechaSinAtencion}
                     value={form.hora}
                     onChange={(e) => set("hora", e.target.value)}
-                  />
+                  >
+                    <option value="">
+                      {!form.fecha
+                        ? "Elige primero la fecha"
+                        : fechaSinAtencion
+                          ? "Día sin atención"
+                          : "Elige una hora"}
+                    </option>
+                    {serviciosDia.map((s) => (
+                      <optgroup
+                        key={s.id}
+                        label={`${s.nombre} (${s.desde} a ${s.hasta})`}
+                      >
+                        {horasDeIngreso(s).map((h) => (
+                          <option key={h} value={h}>
+                            {h}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
                 </div>
               </div>
             </div>
+            {fechaSinAtencion && (
+              <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                Ese día no recibimos reservas: atendemos viernes, sábado y
+                domingo.
+              </p>
+            )}
+            <p className="mt-3 flex items-start gap-1.5 text-xs text-stone-500">
+              <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>Horarios de ingreso: {HORARIOS_TEXTO}.</span>
+            </p>
           </fieldset>
 
           {/* Personas */}
@@ -280,6 +345,43 @@ export default function ReservaPage() {
                   </span>
                 </label>
               ))}
+            </div>
+          </fieldset>
+
+          {/* Abono */}
+          <fieldset className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+            <legend className="flex items-center gap-2 px-1 text-sm font-semibold text-brand-800">
+              <Wallet className="h-4 w-4" /> Abono{" "}
+              {abonoObligatorio ? "(obligatorio para tu mesa)" : "(opcional)"}
+            </legend>
+            <p className="text-sm text-stone-600">
+              Las mesas de {PERSONAS_ABONO_OBLIGATORIO} o más personas deben
+              dejar un abono al reservar. El monto abonado se descuenta
+              después del total de la cuenta.
+            </p>
+            {abonoObligatorio && (
+              <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                Tu mesa es de {totalPersonas} personas: debes indicar un abono
+                para confirmar la reserva.
+              </p>
+            )}
+            <div className="mt-4 sm:max-w-xs">
+              <label className="label" htmlFor="abono">
+                Monto a abonar (CLP){abonoObligatorio && " *"}
+              </label>
+              <input
+                id="abono"
+                type="number"
+                min={abonoObligatorio ? 1 : 0}
+                max={total}
+                required={abonoObligatorio}
+                className="input"
+                value={form.abono}
+                onChange={(e) => set("abono", Number(e.target.value))}
+              />
+              <p className="mt-1 text-xs text-stone-500">
+                Máximo {formatCLP(total)} (total estimado de tu cuenta).
+              </p>
             </div>
           </fieldset>
 
@@ -384,10 +486,25 @@ export default function ReservaPage() {
             <dt className="font-bold">Total estimado</dt>
             <dd className="font-bold text-brand-700">{formatCLP(total)}</dd>
           </div>
+          {form.abono > 0 && (
+            <>
+              <div className="flex justify-between">
+                <dt className="text-stone-600">Abono al reservar</dt>
+                <dd className="font-medium text-green-700">
+                  −{formatCLP(form.abono)}
+                </dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="font-semibold">Saldo en el restaurante</dt>
+                <dd className="font-semibold">{formatCLP(saldoPendiente)}</dd>
+              </div>
+            </>
+          )}
         </dl>
         <p className="mt-4 text-xs text-stone-500">
           {totalPersonas} {totalPersonas === 1 ? "persona" : "personas"} ·{" "}
           {form.salon || "Sin preferencia de salón"}
+          {abonoObligatorio && " · abono obligatorio (mesa de 10+)"}
         </p>
       </aside>
     </div>

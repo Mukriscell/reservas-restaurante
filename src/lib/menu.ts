@@ -45,6 +45,12 @@ export const MENU_IDS = MENUS.map((m) => m.id) as [MenuId, ...MenuId[]];
 export const PRECIO_NINO_6_11 = 9990;
 export const PRECIO_NINO_3_5 = 4990;
 
+/**
+ * Desde esta cantidad de personas la mesa debe dejar un abono obligatorio
+ * al reservar; el monto abonado se descuenta del total de la cuenta.
+ */
+export const PERSONAS_ABONO_OBLIGATORIO = 10;
+
 export function getMenu(id: MenuId) {
   const menu = MENUS.find((m) => m.id === id);
   if (!menu) throw new Error(`Menú desconocido: ${id}`);

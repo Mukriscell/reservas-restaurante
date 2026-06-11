@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Accessibility, FileSpreadsheet, RefreshCw } from "lucide-react";
 import { getMenu, formatCLP } from "@/lib/menu";
 import { SIN_SALON } from "@/lib/salones";
+import { servicioParaReserva } from "@/lib/horarios";
 import type { Reserva } from "@/lib/types";
 
 export default function AdminPage() {
@@ -35,6 +36,7 @@ export default function AdminPage() {
     0
   );
   const totalCLP = reservas.reduce((s, r) => s + r.totalEstimado, 0);
+  const totalAbonado = reservas.reduce((s, r) => s + r.abono, 0);
 
   return (
     <div>
@@ -45,7 +47,7 @@ export default function AdminPage() {
           </h1>
           <p className="mt-1 text-stone-600">
             {reservas.length} reservas · {totalPersonas} personas · ingreso
-            estimado {formatCLP(totalCLP)}
+            estimado {formatCLP(totalCLP)} · abonado {formatCLP(totalAbonado)}
           </p>
         </div>
         <div className="flex gap-2">
@@ -68,7 +70,8 @@ export default function AdminPage() {
 
       <p className="mt-2 text-xs text-stone-500">
         El Excel incluye la tabla completa más hojas divididas por salón, por
-        tipo de menú y por accesibilidad.
+        tipo de menú, por servicio (almuerzo/cena), mesas con abono y
+        accesibilidad, además de las tarifas y los horarios de ingreso.
       </p>
 
       {error && (
@@ -78,7 +81,7 @@ export default function AdminPage() {
       )}
 
       <div className="mt-6 overflow-x-auto rounded-2xl border border-stone-200 bg-white shadow-sm">
-        <table className="w-full min-w-[900px] text-left text-sm">
+        <table className="w-full min-w-[1100px] text-left text-sm">
           <thead className="bg-brand-600 text-white">
             <tr>
               <th className="px-4 py-3 font-semibold">Encargado</th>
@@ -89,18 +92,20 @@ export default function AdminPage() {
               <th className="px-4 py-3 font-semibold">Acces.</th>
               <th className="px-4 py-3 font-semibold">Detalles</th>
               <th className="px-4 py-3 text-right font-semibold">Total</th>
+              <th className="px-4 py-3 text-right font-semibold">Abono</th>
+              <th className="px-4 py-3 text-right font-semibold">Saldo</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-100">
             {cargando ? (
               <tr>
-                <td colSpan={8} className="px-4 py-10 text-center text-stone-500">
+                <td colSpan={10} className="px-4 py-10 text-center text-stone-500">
                   Cargando reservas…
                 </td>
               </tr>
             ) : reservas.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-10 text-center text-stone-500">
+                <td colSpan={10} className="px-4 py-10 text-center text-stone-500">
                   Aún no hay reservas registradas.
                 </td>
               </tr>
@@ -117,7 +122,11 @@ export default function AdminPage() {
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     {r.fecha}
-                    <span className="block text-xs text-stone-500">{r.hora}</span>
+                    <span className="block text-xs text-stone-500">
+                      {r.hora}
+                      {" · "}
+                      {servicioParaReserva(r.fecha, r.hora)?.nombre ?? "—"}
+                    </span>
                   </td>
                   <td className="px-4 py-3">
                     {r.adultos + r.ninos6a11 + r.ninos3a5}
@@ -139,6 +148,12 @@ export default function AdminPage() {
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-brand-700">
                     {formatCLP(r.totalEstimado)}
+                  </td>
+                  <td className="px-4 py-3 text-right text-green-700">
+                    {r.abono > 0 ? formatCLP(r.abono) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-right font-medium">
+                    {formatCLP(r.totalEstimado - r.abono)}
                   </td>
                 </tr>
               ))

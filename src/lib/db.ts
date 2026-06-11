@@ -51,6 +51,7 @@ export async function crearReserva(input: CrearReservaInput): Promise<Reserva> {
     salon: input.salon,
     accesibilidad: input.accesibilidad,
     detalles: input.detalles,
+    abono: input.abono,
     totalEstimado: calcularTotal(input),
   };
 
