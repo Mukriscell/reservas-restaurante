@@ -5,6 +5,13 @@
 
 MESALISTA es una página web donde los clientes de un restaurante reservan su mesa mediante un formulario, reciben la confirmación por correo y pueden cancelar o cambiar su hora de llegada; el equipo del restaurante administra todo desde un panel con login y exporta las reservas a planillas Excel divididas según los datos del formulario.
 
+> Este repositorio contiene **dos aplicaciones independientes**:
+>
+> | App | Carpeta | Qué es |
+> |---|---|---|
+> | **MESALISTA** | raíz (`/`) | Reservas online con Excel, Firestore y panel admin |
+> | **Porto Alegre** | [`/porto-alegre`](porto-alegre/README.md) | App móvil (PWA) para garzones: consumo de bebestibles por mesa |
+
 ## Funcionalidades
 
 ### Formulario público de reserva (`/`)
