@@ -1,12 +1,23 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import { UtensilsCrossed } from "lucide-react";
+import { RegistrarServiceWorker } from "./pwa";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  applicationName: "MESALISTA",
   title: "MESALISTA — Reserva tu mesa",
   description:
     "Sistema de reservas de mesas para restaurante: buffet, salones y atención accesible.",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "MESALISTA",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#c25a15",
 };
 
 export default function RootLayout({
@@ -17,6 +28,7 @@ export default function RootLayout({
   return (
     <html lang="es">
       <body>
+        <RegistrarServiceWorker />
         <header className="border-b border-brand-100 bg-white">
           <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
             <Link href="/" className="flex items-center gap-2">

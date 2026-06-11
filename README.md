@@ -54,6 +54,29 @@ El formulario solo ofrece horas dentro de estas ventanas (en pasos de 15 minutos
 
   Ejemplo de planilla generada: [`docs/reservastest.xlsx`](docs/reservastest.xlsx).
 
+## Instalar como aplicación (PWA)
+
+MESALISTA es una **Progressive Web App**: se instala desde el navegador y queda
+como cualquier otra aplicación, con su propio ícono y ventana, en computadores
+y celulares.
+
+| Dispositivo | Cómo instalar |
+|---|---|
+| **PC / Mac** (Chrome o Edge) | Abre la página y haz clic en el ícono de instalación al final de la barra de direcciones (o menú **⋮ → Instalar MESALISTA**). |
+| **Android** (Chrome) | Abre la página → menú **⋮ → Agregar a la pantalla principal → Instalar**. |
+| **iPhone / iPad** (Safari) | Abre la página → botón **Compartir** → **Agregar a pantalla de inicio**. |
+
+Requisitos: el navegador ofrece la instalación cuando la página se sirve por
+**HTTPS** (o desde `http://localhost` en el mismo computador). Para instalarla
+en celulares u otros equipos, publica la app en un servicio con HTTPS — por
+ejemplo [Vercel](https://vercel.com) (`npx vercel`), Railway o Render — y abre
+esa URL desde cada dispositivo.
+
+> Nota: las reservas se guardan en `data/reservas.json` en el servidor. En
+> plataformas *serverless* (como Vercel) el sistema de archivos no es
+> persistente; para producción usa un servicio con disco persistente o cambia
+> `src/lib/db.ts` a una base de datos (la interfaz ya lo permite).
+
 ## Stack
 
 - **Next.js 15** (App Router) · **TypeScript** · **TailwindCSS**
