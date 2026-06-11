@@ -18,7 +18,9 @@ import type { Reserva } from "./types";
 
 interface RepositorioReservas {
   listar(): Promise<Reserva[]>;
+  obtener(id: string): Promise<Reserva | null>;
   guardar(reserva: Reserva): Promise<void>;
+  actualizar(reserva: Reserva): Promise<void>;
 }
 
 /* ----------------------------- Firestore ------------------------------ */
@@ -39,7 +41,7 @@ function credencialesFirebase() {
     return {
       project_id: FIREBASE_PROJECT_ID,
       client_email: FIREBASE_CLIENT_EMAIL,
-      // En paneles como Railway la clave suele pegarse con \n literales.
+      // En paneles como Vercel o Render la clave suele pegarse con \n literales.
       private_key: FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
     };
   }
@@ -76,17 +78,23 @@ async function repoFirestore(): Promise<RepositorioReservas> {
   }
 
   const db = getFirestore();
+  // Firestore no acepta undefined; serializar lo descarta, igual
+  // que hacía el archivo JSON con los campos opcionales vacíos.
+  const escribir = async (reserva: Reserva) => {
+    const limpia = JSON.parse(JSON.stringify(reserva)) as Reserva;
+    await db.collection(COLECCION).doc(reserva.id).set(limpia);
+  };
   return {
     async listar() {
       const snapshot = await db.collection(COLECCION).get();
       return snapshot.docs.map((doc) => doc.data() as Reserva);
     },
-    async guardar(reserva) {
-      // Firestore no acepta undefined; serializar lo descarta, igual
-      // que hacía el archivo JSON con los campos opcionales vacíos.
-      const limpia = JSON.parse(JSON.stringify(reserva)) as Reserva;
-      await db.collection(COLECCION).doc(reserva.id).set(limpia);
+    async obtener(id) {
+      const doc = await db.collection(COLECCION).doc(id).get();
+      return doc.exists ? (doc.data() as Reserva) : null;
     },
+    guardar: escribir,
+    actualizar: escribir,
   };
 }
 
@@ -108,18 +116,33 @@ async function leerArchivo(): Promise<Reserva[]> {
   }
 }
 
+function escribirArchivo(mutar: (reservas: Reserva[]) => void): Promise<void> {
+  const operacion = writeLock.then(async () => {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    const reservas = await leerArchivo();
+    mutar(reservas);
+    await fs.writeFile(DB_FILE, JSON.stringify(reservas, null, 2), "utf-8");
+  });
+  writeLock = operacion.catch(() => undefined);
+  return operacion;
+}
+
 const repoJson: RepositorioReservas = {
   listar: leerArchivo,
-  async guardar(reserva) {
-    const operacion = writeLock.then(async () => {
-      await fs.mkdir(DATA_DIR, { recursive: true });
-      const reservas = await leerArchivo();
-      reservas.push(reserva);
-      await fs.writeFile(DB_FILE, JSON.stringify(reservas, null, 2), "utf-8");
-    });
-    writeLock = operacion.catch(() => undefined);
-    await operacion;
+  async obtener(id) {
+    const reservas = await leerArchivo();
+    return reservas.find((r) => r.id === id) ?? null;
   },
+  guardar: (reserva) =>
+    escribirArchivo((reservas) => {
+      reservas.push(reserva);
+    }),
+  actualizar: (reserva) =>
+    escribirArchivo((reservas) => {
+      const i = reservas.findIndex((r) => r.id === reserva.id);
+      if (i === -1) throw new Error(`Reserva ${reserva.id} no existe`);
+      reservas[i] = reserva;
+    }),
 };
 
 /* ----------------------------- Selección ------------------------------ */
@@ -147,19 +170,39 @@ function getRepo(): Promise<RepositorioReservas> {
 
 /* ------------------------------- API ---------------------------------- */
 
+/** Completa campos que no existían en reservas guardadas por versiones previas. */
+function normalizar(reserva: Reserva): Reserva {
+  return {
+    ...reserva,
+    estado: reserva.estado ?? "CONFIRMADA",
+    email: reserva.email ?? "",
+  };
+}
+
 export async function listarReservas(): Promise<Reserva[]> {
   const reservas = await (await getRepo()).listar();
   // Más recientes primero por fecha/hora de la reserva.
-  return reservas.sort((a, b) =>
-    `${b.fecha} ${b.hora}`.localeCompare(`${a.fecha} ${a.hora}`)
-  );
+  return reservas
+    .map(normalizar)
+    .sort((a, b) => `${b.fecha} ${b.hora}`.localeCompare(`${a.fecha} ${a.hora}`));
+}
+
+export async function obtenerReserva(id: string): Promise<Reserva | null> {
+  const reserva = await (await getRepo()).obtener(id);
+  return reserva ? normalizar(reserva) : null;
+}
+
+export async function actualizarReserva(reserva: Reserva): Promise<void> {
+  await (await getRepo()).actualizar(reserva);
 }
 
 export async function crearReserva(input: CrearReservaInput): Promise<Reserva> {
   const reserva: Reserva = {
     id: randomUUID(),
     creadaEn: new Date().toISOString(),
+    estado: "CONFIRMADA",
     nombreEncargado: input.nombreEncargado,
+    email: input.email,
     telefono: input.telefono || undefined,
     fecha: input.fecha,
     hora: input.hora,

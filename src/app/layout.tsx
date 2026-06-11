@@ -43,12 +43,6 @@ export default function RootLayout({
               <Link href="/" className="text-stone-600 hover:text-brand-700">
                 Reservar
               </Link>
-              <Link
-                href="/admin"
-                className="text-stone-600 hover:text-brand-700"
-              >
-                Administración
-              </Link>
             </nav>
           </div>
         </header>

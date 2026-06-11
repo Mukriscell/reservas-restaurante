@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { MENU_IDS, PERSONAS_ABONO_OBLIGATORIO, calcularTotal } from "./menu";
 import { SALONES } from "./salones";
-import { nombreDia, serviciosParaFecha, servicioParaReserva } from "./horarios";
+import {
+  descripcionIngreso,
+  nombreDia,
+  serviciosParaFecha,
+  servicioParaReserva,
+} from "./horarios";
 
 /** Contrato de creación de reserva (formulario público → API). */
 export const crearReservaSchema = z
@@ -11,6 +16,11 @@ export const crearReservaSchema = z
       .trim()
       .min(2, "El nombre del encargado debe tener al menos 2 caracteres")
       .max(120, "El nombre es demasiado largo"),
+    email: z
+      .string()
+      .trim()
+      .email("Correo electrónico inválido")
+      .max(254, "El correo es demasiado largo"),
     telefono: z
       .string()
       .trim()
@@ -57,9 +67,7 @@ export const crearReservaSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["hora"],
-        message: `El ${nombreDia(data.fecha)} el ingreso es: ${servicios
-          .map((s) => `${s.nombre.toLowerCase()} de ${s.desde} a ${s.hasta}`)
-          .join(" y ")}`,
+        message: `El ${nombreDia(data.fecha)} el ingreso es: ${descripcionIngreso(data.fecha)}`,
       });
     }
 
@@ -82,3 +90,18 @@ export const crearReservaSchema = z
   });
 
 export type CrearReservaInput = z.infer<typeof crearReservaSchema>;
+
+/** Acciones del cliente sobre una reserva existente (página de gestión). */
+export const accionReservaSchema = z.discriminatedUnion(
+  "accion",
+  [
+    z.object({ accion: z.literal("cancelar") }),
+    z.object({
+      accion: z.literal("cambiarHora"),
+      hora: z.string().regex(/^\d{2}:\d{2}$/, "Hora inválida (formato HH:MM)"),
+    }),
+  ],
+  { errorMap: () => ({ message: "Acción inválida: usa cancelar o cambiarHora" }) }
+);
+
+export type AccionReserva = z.infer<typeof accionReservaSchema>;

@@ -1,8 +1,17 @@
 import { NextResponse } from "next/server";
 import { crearReservaSchema } from "@/lib/validation";
 import { crearReserva, listarReservas } from "@/lib/db";
+import { sesionAdminValida } from "@/lib/auth";
+import { correoConfirmacion, enviarCorreo } from "@/lib/mail";
+import { urlBase } from "@/lib/url";
 
 export async function GET() {
+  if (!(await sesionAdminValida())) {
+    return NextResponse.json(
+      { error: "Requiere sesión de administrador" },
+      { status: 401 }
+    );
+  }
   const reservas = await listarReservas();
   return NextResponse.json({ data: reservas });
 }
@@ -33,5 +42,13 @@ export async function POST(request: Request) {
   }
 
   const reserva = await crearReserva(parsed.data);
-  return NextResponse.json({ data: reserva }, { status: 201 });
+  const urlGestion = `${urlBase(request)}/reserva/${reserva.id}`;
+  const correoEnviado = await enviarCorreo(
+    reserva.email,
+    correoConfirmacion(reserva, urlGestion)
+  );
+  return NextResponse.json(
+    { data: reserva, urlGestion, correoEnviado },
+    { status: 201 }
+  );
 }

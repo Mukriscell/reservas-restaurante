@@ -15,16 +15,18 @@ import type { Reserva } from "./types";
  * Genera un libro Excel con las reservas divididas en tablas (hojas)
  * según lo solicitado en el formulario:
  *
- *  - "Todas las Reservas": tabla completa.
+ *  - "Todas las Reservas": tabla completa (reservas confirmadas).
  *  - Una hoja por salón (incluye "Sin preferencia").
  *  - Una hoja por tipo de menú.
  *  - "Almuerzo" y "Cena": según el servicio al que ingresa la mesa.
  *  - "Con abono": mesas que dejaron abono (con su saldo pendiente).
  *  - "Accesibilidad": reservas que indicaron asistente con discapacidad.
+ *  - "Canceladas": reservas anuladas por el cliente (fuera de las demás hojas).
  */
 
 const COLUMNS: Partial<ExcelJS.Column>[] = [
   { header: "Encargado de la mesa", key: "nombreEncargado", width: 28 },
+  { header: "Correo", key: "email", width: 28 },
   { header: "Teléfono", key: "telefono", width: 16 },
   { header: "Fecha", key: "fecha", width: 12 },
   { header: "Hora", key: "hora", width: 8 },
@@ -68,6 +70,7 @@ function agregarHoja(
   for (const r of reservas) {
     sheet.addRow({
       nombreEncargado: r.nombreEncargado,
+      email: r.email,
       telefono: r.telefono ?? "",
       fecha: r.fecha,
       hora: r.hora,
@@ -116,21 +119,25 @@ export async function generarExcelReservas(
   workbook.creator = "MESALISTA";
   workbook.created = new Date();
 
+  // Las canceladas van solo a su propia hoja, fuera de las operativas.
+  const activas = reservas.filter((r) => r.estado !== "CANCELADA");
+  const canceladas = reservas.filter((r) => r.estado === "CANCELADA");
+
   // 1. Tabla completa
-  agregarHoja(workbook, "Todas las Reservas", reservas);
+  agregarHoja(workbook, "Todas las Reservas", activas);
 
   // 2. Dividido por salón
   for (const salon of SALONES) {
     agregarHoja(
       workbook,
       salon,
-      reservas.filter((r) => r.salon === salon)
+      activas.filter((r) => r.salon === salon)
     );
   }
   agregarHoja(
     workbook,
     SIN_SALON,
-    reservas.filter((r) => !r.salon)
+    activas.filter((r) => !r.salon)
   );
 
   // 3. Dividido por tipo de menú
@@ -139,7 +146,7 @@ export async function generarExcelReservas(
       workbook,
       // nombre corto: Excel limita los nombres de hoja a 31 caracteres
       `Menú ${menu.nombreCorto}`,
-      reservas.filter((r) => r.menuId === menu.id)
+      activas.filter((r) => r.menuId === menu.id)
     );
   }
 
@@ -148,7 +155,7 @@ export async function generarExcelReservas(
     agregarHoja(
       workbook,
       servicio.nombre,
-      reservas.filter(
+      activas.filter(
         (r) => servicioParaReserva(r.fecha, r.hora)?.id === servicio.id
       )
     );
@@ -158,15 +165,18 @@ export async function generarExcelReservas(
   agregarHoja(
     workbook,
     "Con abono",
-    reservas.filter((r) => r.abono > 0)
+    activas.filter((r) => r.abono > 0)
   );
 
   // 6. Reservas con accesibilidad
   agregarHoja(
     workbook,
     "Accesibilidad",
-    reservas.filter((r) => r.accesibilidad)
+    activas.filter((r) => r.accesibilidad)
   );
+
+  // 7. Reservas canceladas por los clientes
+  agregarHoja(workbook, "Canceladas", canceladas);
 
   // Hoja de referencia de precios
   const precios = workbook.addWorksheet("Tarifas");

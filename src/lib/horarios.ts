@@ -3,7 +3,8 @@
  *
  * Se reciben reservas solo viernes, sábado y domingo:
  *  - Viernes: cena de 18:30 a 22:15.
- *  - Sábado y domingo: almuerzo de 12:45 a 16:15 y cena de 18:30 a 22:15.
+ *  - Sábado: almuerzo de 12:45 a 16:15 y cena de 18:30 a 22:15.
+ *  - Domingo: solo almuerzo de 12:45 a 16:15.
  */
 
 export interface Servicio {
@@ -31,14 +32,14 @@ export const CENA: Servicio = {
 export const DIAS_ATENCION: { nombre: string; servicios: Servicio[] }[] = [
   { nombre: "Viernes", servicios: [CENA] },
   { nombre: "Sábado", servicios: [ALMUERZO, CENA] },
-  { nombre: "Domingo", servicios: [ALMUERZO, CENA] },
+  { nombre: "Domingo", servicios: [ALMUERZO] },
 ];
 
 /** Servicios por día de la semana (0 = domingo … 6 = sábado). */
 const SERVICIOS_POR_DIA: Record<number, Servicio[]> = {
   5: [CENA],
   6: [ALMUERZO, CENA],
-  0: [ALMUERZO, CENA],
+  0: [ALMUERZO],
 };
 
 const NOMBRES_DIA = [
@@ -95,4 +96,36 @@ export function horasDeIngreso(servicio: Servicio): string[] {
     horas.push(`${hh}:${mm}`);
   }
   return horas;
+}
+
+/** Texto "almuerzo de 12:45 a 16:15 y cena de 18:30 a 22:15" para mensajes. */
+export function descripcionIngreso(fecha: string): string {
+  return serviciosParaFecha(fecha)
+    .map((s) => `${s.nombre.toLowerCase()} de ${s.desde} a ${s.hasta}`)
+    .join(" y ");
+}
+
+/** Fecha y hora actuales en Chile (America/Santiago), como AAAA-MM-DD y HH:MM. */
+export function ahoraEnChile(): { fecha: string; hora: string } {
+  const partes = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Santiago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const v = (tipo: Intl.DateTimeFormatPartTypes) =>
+    partes.find((p) => p.type === tipo)?.value ?? "";
+  return {
+    fecha: `${v("year")}-${v("month")}-${v("day")}`,
+    hora: `${v("hour")}:${v("minute")}`,
+  };
+}
+
+/** true si la reserva aún no ocurre: se puede cancelar o cambiar de hora. */
+export function reservaVigente(fecha: string, hora: string): boolean {
+  const ahora = ahoraEnChile();
+  return `${fecha} ${hora}` > `${ahora.fecha} ${ahora.hora}`;
 }

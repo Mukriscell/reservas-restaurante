@@ -1,0 +1,22 @@
+# Blueprint de Render (https://render.com) — alternativa de despliegue
+# gratuita. En el plan free el servicio se duerme tras 15 minutos sin
+# visitas y la siguiente visita tarda ~1 minuto en despertarlo.
+services:
+  - type: web
+    name: mesalista
+    runtime: node
+    plan: free
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm build
+    startCommand: pnpm start
+    healthCheckPath: /
+    envVars:
+      # Credencial de Firestore: contenido del .json de la cuenta de servicio.
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false
+      # Credenciales del panel /admin (obligatorias en producción).
+      - key: ADMIN_USER
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      # SMTP para los correos de confirmación: agrega SMTP_HOST, SMTP_USER
+      # y SMTP_PASS desde el dashboard si quieres habilitarlos.

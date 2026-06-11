@@ -35,6 +35,7 @@ const HORARIOS_TEXTO = DIAS_ATENCION.map(
 
 interface FormState {
   nombreEncargado: string;
+  email: string;
   telefono: string;
   fecha: string;
   hora: string;
@@ -50,6 +51,7 @@ interface FormState {
 
 const initialState: FormState = {
   nombreEncargado: "",
+  email: "",
   telefono: "",
   fecha: "",
   hora: "",
@@ -66,7 +68,10 @@ const initialState: FormState = {
 export default function ReservaPage() {
   const [form, setForm] = useState<FormState>(initialState);
   const [enviando, setEnviando] = useState(false);
-  const [exito, setExito] = useState(false);
+  const [exito, setExito] = useState<{
+    urlGestion?: string;
+    correoEnviado?: boolean;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const total = useMemo(
@@ -108,7 +113,10 @@ export default function ReservaPage() {
         const detalle = json.detalles?.[0]?.mensaje;
         throw new Error(detalle ?? json.error ?? "No se pudo crear la reserva");
       }
-      setExito(true);
+      setExito({
+        urlGestion: json.urlGestion,
+        correoEnviado: json.correoEnviado,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error inesperado");
     } finally {
@@ -135,11 +143,24 @@ export default function ReservaPage() {
             </>
           )}
         </p>
+        <p className="mt-3 text-sm text-stone-600">
+          {exito.correoEnviado
+            ? `Te enviamos la confirmación a ${form.email} con el enlace para gestionar tu reserva.`
+            : "Guarda este enlace para gestionar tu reserva:"}
+        </p>
+        {exito.urlGestion && (
+          <a
+            href={exito.urlGestion}
+            className="mt-3 block break-all rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-sm font-medium text-brand-700 hover:bg-brand-100"
+          >
+            Cancelar o cambiar la hora de tu reserva
+          </a>
+        )}
         <button
           className="mt-6 rounded-lg bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-700"
           onClick={() => {
             setForm(initialState);
-            setExito(false);
+            setExito(null);
           }}
         >
           Hacer otra reserva
@@ -180,6 +201,24 @@ export default function ReservaPage() {
                 />
               </div>
               <div>
+                <label className="label" htmlFor="email">
+                  Correo electrónico *
+                </label>
+                <input
+                  id="email"
+                  type="email"
+                  className="input"
+                  required
+                  placeholder="tucorreo@ejemplo.cl"
+                  value={form.email}
+                  onChange={(e) => set("email", e.target.value)}
+                />
+                <p className="mt-1 text-xs text-stone-500">
+                  Te enviaremos la confirmación y el enlace para gestionar tu
+                  reserva.
+                </p>
+              </div>
+              <div>
                 <label className="label" htmlFor="telefono">
                   Teléfono de contacto (opcional)
                 </label>
@@ -191,7 +230,7 @@ export default function ReservaPage() {
                   onChange={(e) => set("telefono", e.target.value)}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-4 sm:col-span-2">
                 <div>
                   <label className="label" htmlFor="fecha">
                     Fecha *
