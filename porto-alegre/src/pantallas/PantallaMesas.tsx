@@ -1,4 +1,4 @@
-import { History, Martini, UserRound } from "lucide-react";
+import { History, Martini, ScrollText, UserRound } from "lucide-react";
 import { useEstadoApp, useGarzonActual } from "../estado/contexto";
 import { TarjetaMesa } from "../componentes/TarjetaMesa";
 import { PillConexion } from "../componentes/Conexion";
@@ -9,11 +9,13 @@ export function PantallaMesas({
   seleccionadaId,
   onAbrirMesa,
   onVerHistorial,
+  onVerAuditoria,
   onCambiarGarzon,
 }: {
   seleccionadaId: string | null;
   onAbrirMesa: (mesaId: string) => void;
   onVerHistorial: () => void;
+  onVerAuditoria: () => void;
   onCambiarGarzon: () => void;
 }) {
   const { mesas, atenciones, garzones } = useEstadoApp();
@@ -48,6 +50,9 @@ export function PantallaMesas({
           </button>
           <button onClick={onVerHistorial} className="btn btn-borde">
             <History className="h-4 w-4" /> Historial
+          </button>
+          <button onClick={onVerAuditoria} className="btn btn-borde">
+            <ScrollText className="h-4 w-4" /> Auditoría
           </button>
           <span className="flex-1" />
         </div>

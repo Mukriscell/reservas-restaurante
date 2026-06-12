@@ -92,6 +92,48 @@ app no puede hacer `UPDATE`/`DELETE` directo (RLS).
 > (pill roja *Sin conexión*) para impedir divergencias, y al volver la señal
 > el canal se reconecta y revalida todo el estado.
 
+## 3b. Auditoría completa e inalterable
+
+Tabla `auditoria`
+([`0003_auditoria.sql`](supabase/migrations/0003_auditoria.sql)) con
+**quién** (usuario + nombre y rol congelados al momento de la acción),
+**qué** (acción/entidad), **dónde** (mesa/atención), **estado anterior y
+nuevo** (jsonb) y fecha exacta:
+
+- **Inalterable de verdad**: la app solo puede leer (RLS + revocación de
+  INSERT/UPDATE/DELETE) y triggers `before update/delete/truncate`
+  rechazan cambios **incluso para las funciones del sistema**: los
+  registros nunca se modifican ni se eliminan.
+- **Registro automático**: cada función RPC escribe su registro dentro de
+  la misma transacción (sin triggers genéricos: cada acción guarda su
+  semántica). Acciones cubiertas: `APERTURA_MESA`, `AGREGAR_PRODUCTO`,
+  `ELIMINAR_PRODUCTO`, `MODIFICAR_CANTIDAD` (antes → después),
+  `FIJAR_MENU`, `REGISTRAR_ABONO`, `ELIMINAR_ABONO`,
+  `TRANSFERENCIA_MESA` (garzón anterior → nuevo), `CIERRE_MESA` (total,
+  abonos y saldo), `REAPERTURA_MESA`, `GENERAR_PRECUENTA`, `LOGIN`,
+  `LOGOUT`, `CREACION_USUARIO`, `MODIFICACION_USUARIO` y
+  `DESACTIVACION_USUARIO`.
+- **Pantalla de auditoría** con filtros (fecha, usuario, mesa, tipo de
+  acción) y búsqueda (nombre / número de mesa). El **ADMIN** (rol en
+  `garzones`) ve todo; un **garzón** solo sus acciones y las de sus
+  propias mesas.
+- **Transferencia de mesa**: una atención abierta puede traspasarse a
+  otro garzón (`transferir_atencion`), con auditoría antes/después.
+- En **modo local** la auditoría se replica en localStorage (append-only,
+  tope de 2.000 registros).
+
+## 3c. Precuenta PDF
+
+Desde cualquier mesa activa, **Generar precuenta** produce un PDF
+profesional formato ticket 80 mm con la identidad Porto Alegre
+(encabezado verde Brasil, logo, acento amarillo): fecha/hora, mesa,
+garzón responsable, detalle de consumo, menú buffet, **resumen por
+categorías**, resumen financiero con abonos y **saldo pendiente**
+destacado, y pie *"Gracias por preferir Porto Alegre"*. Se puede
+**descargar, compartir** (hoja nativa del teléfono) **o imprimir**, y
+cada emisión queda en la auditoría (`GENERAR_PRECUENTA`). jsPDF se carga
+bajo demanda (code-splitting), así que el bundle principal no crece.
+
 ## 4. Estructura de carpetas
 
 ```
@@ -100,9 +142,10 @@ porto-alegre/
   vercel.json                 → despliegue en Vercel (SPA + service worker)
   supabase/migrations/
     0001_esquema.sql          → esquema histórico (modelo viejo)
-    0002_atenciones.sql       → ESQUEMA VIGENTE: mesas permanentes,
-                                atenciones, consumos, abonos, garzones,
-                                RLS, RPCs transaccionales, seed, Realtime
+    0002_atenciones.sql       → mesas permanentes, atenciones, consumos,
+                                abonos, garzones, RLS, RPCs, seed, Realtime
+    0003_auditoria.sql        → auditoría inalterable + roles + RPCs con
+                                registro automático + transferencia
   public/
     manifest.webmanifest      → identidad de la app instalable
     sw.js                     → service worker (offline tras primera carga)
@@ -114,14 +157,18 @@ porto-alegre/
     data/menus.ts             → menús buffet (mismos valores que MESALISTA)
     db/almacen.ts             → localStorage (modo local + caché offline,
                                 migra el esquema v1 sin perder cuentas)
-    sync/supabase.ts          → cliente, mapeos, RPCs, historial bajo demanda
+    sync/supabase.ts          → cliente, mapeos, RPCs, historial y
+                                auditoría bajo demanda
     estado/contexto.tsx       → reducer + optimistic updates + Realtime
-    util/                     → dinero (CLP), búsqueda, fechas, tema
+    util/                     → dinero (CLP), búsqueda, fechas, tema,
+                                auditoría (descripciones), precuenta (PDF)
     componentes/              → TarjetaMesa, Buscador, LineaConsumo,
-                                SelectorMenu, SelectorGarzon, SeccionAbonos,
+                                SelectorMenu, SelectorGarzon (+ gestión de
+                                usuarios ADMIN), SeccionAbonos,
                                 ItemAtencion, Aviso, Conexion, BotonTema
     pantallas/                → PantallaMesas, PantallaMesa,
-                                PantallaDesglose, PantallaHistorial
+                                PantallaDesglose, PantallaHistorial,
+                                PantallaAuditoria
 ```
 
 ## 5. Base de datos
@@ -134,7 +181,8 @@ porto-alegre/
 | `atenciones` | Una por ocupación: `numero` correlativo (#145), `mesa_id`, `garzon_id`, estado, fechas de apertura/cierre y totales congelados (`total_menu`, `total_consumos`, `total_abonos`, `saldo_final`) |
 | `consumos` | Una fila por producto y atención: `cantidad`, `precio_unitario`, `subtotal` calculado |
 | `abonos` | Pagos parciales: `monto`, `observacion`, `garzon_id`, fecha |
-| `garzones` | Quién atiende (seed de 10, se agregan más desde la app) |
+| `garzones` | Quién atiende, con `rol` ADMIN/GARZON (seed de 10 + Administración) |
+| `auditoria` | Registro inalterable de toda acción (solo INSERT desde las funciones; solo SELECT para la app) |
 
 El catálogo de productos es un módulo estático del cliente (precios
 capturados al agregar). En modo local, el mismo modelo se guarda versionado
@@ -143,11 +191,12 @@ en localStorage bajo `porto-alegre-mesas`.
 ### Configurar Supabase (una sola vez)
 
 1. Crea un proyecto gratis en [supabase.com](https://supabase.com).
-2. **SQL Editor → New query** → pega completo
-   [`supabase/migrations/0002_atenciones.sql`](supabase/migrations/0002_atenciones.sql)
-   y ejecuta (**Run**). Sirve igual para un proyecto nuevo o para
-   actualizar el esquema viejo (0001), y es idempotente: re-ejecutarlo no
-   borra el historial.
+2. **SQL Editor → New query** → pega y ejecuta (**Run**), en orden:
+   primero [`supabase/migrations/0002_atenciones.sql`](supabase/migrations/0002_atenciones.sql)
+   y luego [`supabase/migrations/0003_auditoria.sql`](supabase/migrations/0003_auditoria.sql).
+   Sirven igual para un proyecto nuevo o para actualizar el esquema
+   viejo, y son idempotentes: re-ejecutarlos no borra historial ni
+   auditoría.
 3. **Project Settings → API keys** → copia la clave *Publishable*
    (`sb_publishable_…`) y, en **Project Settings → General**, la *Project
    URL* (`https://….supabase.co`).
@@ -172,9 +221,10 @@ la preferencia y respeta la del sistema).
 | Pantalla | Qué hace |
 |---|---|
 | **Mesas** | Las 100 mesas permanentes: verde = libre, amarillo = ocupada (con total y garzón), **azul = última mesa seleccionada**. Header con garzón de turno e Historial. |
-| **Mesa** | Tres vistas: mesa **libre** (abrir atención + cuentas anteriores), **cuenta abierta** (buscador fijo, carta a un toque, consumos, **abonos con saldo pendiente**, cobrar en dos toques) y **recibo** recién cobrado (reabrir / desglose). |
+| **Mesa** | Tres vistas: mesa **libre** (abrir atención + cuentas anteriores), **cuenta abierta** (buscador fijo, carta a un toque, consumos, **abonos con saldo pendiente**, **precuenta PDF**, **transferir mesa**, cobrar en dos toques) y **recibo** recién cobrado (reabrir / desglose). |
 | **Desglose** | La cuenta completa de una atención (abierta o histórica): menú según personas, consumos `2 x Heineken = $7.600`, abonos y TOTAL con saldo. |
 | **Historial** | Las atenciones pagadas de todas las mesas (más recientes primero) con resumen del día; cada una abre su desglose. |
+| **Auditoría** | Registro inalterable con filtros por fecha/usuario/mesa/acción y búsqueda. ADMIN ve todo; el garzón, solo lo suyo. |
 
 Botones de mínimo 48 px, tipografía contundente y layout de dos columnas en
 tablets (carta junto a la cuenta), estilo POS moderno.
@@ -199,9 +249,14 @@ cd porto-alegre
 pnpm install
 cp .env.example .env   # opcional: credenciales de Supabase (modo compartido)
 pnpm dev               # desarrollo → http://localhost:5173
-pnpm build             # typecheck + bundle de producción en dist/
+pnpm build             # bundle de producción en dist/ (rápido: sin tsc)
+pnpm check             # typecheck completo + build (para CI / antes de subir)
 pnpm start             # sirve dist/ localmente
 ```
+
+> `pnpm build` ya no ejecuta `tsc --noEmit`: los deploys en Vercel
+> compilan en segundos y el typecheck queda en `pnpm check`/`pnpm
+> typecheck` para correrlo en local o CI.
 
 ## 9. Instalar en el celular (PWA)
 

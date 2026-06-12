@@ -9,13 +9,17 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type {
-  Abono,
-  Atencion,
-  Consumo,
-  Garzon,
-  Mesa,
-  MenuMesa,
+import {
+  saldoPendiente,
+  totalCuenta,
+  type Abono,
+  type Atencion,
+  type Consumo,
+  type Garzon,
+  type Mesa,
+  type MenuMesa,
+  type RegistroAuditoria,
+  type RolGarzon,
 } from "../tipos";
 import { getProducto } from "../data/catalogo";
 import { totalMenu } from "../data/menus";
@@ -24,6 +28,7 @@ import {
   cargarGarzonId,
   guardarEstado,
   guardarGarzonId,
+  MAX_AUDITORIA_LOCAL,
   type EstadoApp,
 } from "../db/almacen";
 import {
@@ -72,6 +77,7 @@ type Accion =
   | { tipo: "CAMBIAR_CANTIDAD"; atencionId: string; consumoId: string; delta: 1 | -1 }
   | { tipo: "ELIMINAR_CONSUMO"; atencionId: string; consumoId: string }
   | { tipo: "FIJAR_MENU"; atencionId: string; menu: MenuMesa | null }
+  | { tipo: "TRANSFERIR_ATENCION"; atencionId: string; garzonId: string }
   // Mutaciones de negocio (solo modo local; en compartido las resuelve la RPC)
   | { tipo: "ABRIR_ATENCION"; atencion: Atencion }
   | { tipo: "CERRAR_ATENCION"; atencionId: string }
@@ -85,6 +91,7 @@ type Accion =
   | { tipo: "APLICAR_ABONO"; abono: Abono }
   | { tipo: "QUITAR_ABONO"; abonoId: string }
   | { tipo: "APLICAR_GARZON"; garzon: Garzon }
+  | { tipo: "AGREGAR_AUDITORIA"; registro: RegistroAuditoria }
   | {
       tipo: "REEMPLAZAR_DETALLE";
       atencionId: string;
@@ -153,6 +160,8 @@ export function reducer(estado: EstadoApp, accion: Accion): EstadoApp {
       return {
         mesas: accion.estado.mesas,
         garzones: accion.estado.garzones,
+        // La auditoría local solo aplica en modo local; se conserva.
+        auditoria: estado.auditoria,
         atenciones: conocidas,
         consumos: [
           ...estado.consumos.filter(
@@ -189,6 +198,13 @@ export function reducer(estado: EstadoApp, accion: Accion): EstadoApp {
           : [...estado.garzones, accion.garzon],
       };
     }
+
+    case "AGREGAR_AUDITORIA":
+      // Append-only, igual que la tabla del servidor (con tope local).
+      return {
+        ...estado,
+        auditoria: [...estado.auditoria, accion.registro].slice(-MAX_AUDITORIA_LOCAL),
+      };
 
     case "APLICAR_CONSUMO": {
       const existe = estado.consumos.some((c) => c.id === accion.consumo.id);
@@ -354,6 +370,9 @@ export function reducer(estado: EstadoApp, accion: Accion): EstadoApp {
             conAtencion(estado, { ...atencion, menu: accion.menu }),
             atencion.id
           );
+
+        case "TRANSFERIR_ATENCION":
+          return conAtencion(estado, { ...atencion, garzonId: accion.garzonId });
       }
     }
   }
@@ -388,6 +407,13 @@ export interface AccionesApp {
   /** false si la atención ya había sido cerrada por otro garzón. */
   cerrarAtencion(atencionId: string): Promise<boolean>;
   reabrirAtencion(atencionId: string): Promise<boolean>;
+  /** Traspasa la atención abierta a otro garzón (TRANSFERENCIA_MESA). */
+  transferirAtencion(atencionId: string, garzonNuevoId: string): Promise<boolean>;
+  /** Gestión de usuarios (solo ADMIN en la interfaz). */
+  modificarGarzon(garzonId: string, nombre: string, rol: RolGarzon): Promise<boolean>;
+  desactivarGarzon(garzonId: string): Promise<boolean>;
+  /** Deja constancia GENERAR_PRECUENTA en la auditoría. */
+  registrarPrecuenta(atencionId: string): void;
 }
 
 const CtxEstado = createContext<EstadoApp | null>(null);
@@ -614,11 +640,81 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
     return false;
   }, [avisar]);
 
+  /* --------------------------- Auditoría ------------------------------- */
+
+  // En modo compartido la auditoría la escriben las funciones SQL dentro
+  // de cada transacción; en modo local se replica aquí, append-only.
+  const auditSeq = useRef(0);
+  const auditarLocal = useCallback(
+    (
+      registro: Omit<
+        RegistroAuditoria,
+        "id" | "creadoEn" | "nombreUsuario" | "rolUsuario"
+      >
+    ) => {
+      if (MODO_COMPARTIDO) return;
+      const garzon = estadoRef.current.garzones.find(
+        (g) => g.id === registro.usuarioId
+      );
+      auditSeq.current += 1;
+      dispatch({
+        tipo: "AGREGAR_AUDITORIA",
+        registro: {
+          ...registro,
+          id: `aud-${Date.now()}-${auditSeq.current}`,
+          creadoEn: new Date().toISOString(),
+          nombreUsuario: garzon?.nombre ?? "sistema",
+          rolUsuario: garzon?.rol ?? "",
+        },
+      });
+    },
+    []
+  );
+
+  const numeroDeMesa = useCallback((mesaId: string | null): number | null => {
+    if (!mesaId) return null;
+    return estadoRef.current.mesas.find((m) => m.id === mesaId)?.numero ?? null;
+  }, []);
+
+  /** LOGIN/LOGOUT del garzón de este dispositivo, con auditoría. */
+  const seleccionar = useCallback(
+    (nuevo: string | null) => {
+      const anterior = garzonRef.current;
+      if (anterior === nuevo) return;
+      const sesion = (garzonId2: string, accion: "LOGIN" | "LOGOUT") => {
+        if (MODO_COMPARTIDO) {
+          if (conexionRef.current === "online") {
+            void rpc("registrar_sesion", {
+              p_garzon_id: garzonId2,
+              p_accion: accion,
+            }).catch(() => undefined);
+          }
+          return;
+        }
+        auditarLocal({
+          usuarioId: garzonId2,
+          accion,
+          entidad: "garzones",
+          entidadId: garzonId2,
+          mesaNumero: null,
+          atencionId: null,
+          valorAnterior: null,
+          valorNuevo: null,
+          observacion: "",
+        });
+      };
+      if (anterior) sesion(anterior, "LOGOUT");
+      if (nuevo) sesion(nuevo, "LOGIN");
+      setGarzonId(nuevo);
+      guardarGarzonId(nuevo);
+    },
+    [auditarLocal]
+  );
+
   const acciones = useMemo<AccionesApp>(
     () => ({
       seleccionarGarzon(nuevo) {
-        setGarzonId(nuevo);
-        guardarGarzonId(nuevo);
+        seleccionar(nuevo);
       },
 
       async crearGarzon(nombre) {
@@ -636,19 +732,117 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
             id: `g-l-${Date.now()}`,
             nombre: limpio,
             activo: true,
+            rol: "GARZON",
           };
+          auditarLocal({
+            usuarioId: garzonRef.current,
+            accion: "CREACION_USUARIO",
+            entidad: "garzones",
+            entidadId: garzon.id,
+            mesaNumero: null,
+            atencionId: null,
+            valorAnterior: null,
+            valorNuevo: { nombre: garzon.nombre, rol: garzon.rol },
+            observacion: "",
+          });
           dispatch({ tipo: "APLICAR_GARZON", garzon });
           return garzon;
         }
         if (sinConexion()) return null;
         try {
-          const fila = await rpc<FilaGarzon>("crear_garzon", { p_nombre: limpio });
+          const fila = await rpc<FilaGarzon>("crear_garzon", {
+            p_nombre: limpio,
+            p_actor_id: garzonRef.current,
+          });
           const garzon = mapGarzon(fila);
           dispatch({ tipo: "APLICAR_GARZON", garzon });
           return garzon;
         } catch (e: unknown) {
           avisar(e instanceof ErrorRpc ? e.message : "No se pudo crear el garzón");
           return null;
+        }
+      },
+
+      async modificarGarzon(garzonId2, nombre, rol) {
+        const limpio = nombre.trim();
+        if (limpio.length < 2 || limpio.length > 40) {
+          avisar("El nombre debe tener entre 2 y 40 caracteres");
+          return false;
+        }
+        if (!MODO_COMPARTIDO) {
+          const garzon = estadoRef.current.garzones.find((g) => g.id === garzonId2);
+          if (!garzon) return false;
+          const duplicado = estadoRef.current.garzones.some(
+            (g) => g.id !== garzonId2 && g.nombre.toLowerCase() === limpio.toLowerCase()
+          );
+          if (duplicado) {
+            avisar("Ya existe un garzón con ese nombre");
+            return false;
+          }
+          auditarLocal({
+            usuarioId: garzonRef.current,
+            accion: "MODIFICACION_USUARIO",
+            entidad: "garzones",
+            entidadId: garzonId2,
+            mesaNumero: null,
+            atencionId: null,
+            valorAnterior: { nombre: garzon.nombre, rol: garzon.rol },
+            valorNuevo: { nombre: limpio, rol },
+            observacion: "",
+          });
+          dispatch({
+            tipo: "APLICAR_GARZON",
+            garzon: { ...garzon, nombre: limpio, rol },
+          });
+          return true;
+        }
+        if (sinConexion()) return false;
+        try {
+          const fila = await rpc<FilaGarzon>("modificar_garzon", {
+            p_garzon_id: garzonId2,
+            p_nombre: limpio,
+            p_rol: rol,
+            p_actor_id: garzonRef.current,
+          });
+          dispatch({ tipo: "APLICAR_GARZON", garzon: mapGarzon(fila) });
+          return true;
+        } catch (e: unknown) {
+          avisar(e instanceof ErrorRpc ? e.message : "No se pudo modificar el garzón");
+          return false;
+        }
+      },
+
+      async desactivarGarzon(garzonId2) {
+        if (!MODO_COMPARTIDO) {
+          const garzon = estadoRef.current.garzones.find((g) => g.id === garzonId2);
+          if (!garzon || !garzon.activo) return false;
+          auditarLocal({
+            usuarioId: garzonRef.current,
+            accion: "DESACTIVACION_USUARIO",
+            entidad: "garzones",
+            entidadId: garzonId2,
+            mesaNumero: null,
+            atencionId: null,
+            valorAnterior: { activo: true },
+            valorNuevo: { activo: false, nombre: garzon.nombre },
+            observacion: "",
+          });
+          dispatch({ tipo: "APLICAR_GARZON", garzon: { ...garzon, activo: false } });
+          if (garzonRef.current === garzonId2) seleccionar(null);
+          return true;
+        }
+        if (sinConexion()) return false;
+        try {
+          const fila = await rpc<FilaGarzon>("desactivar_garzon", {
+            p_garzon_id: garzonId2,
+            p_actor_id: garzonRef.current,
+          });
+          dispatch({ tipo: "APLICAR_GARZON", garzon: mapGarzon(fila) });
+          if (garzonRef.current === garzonId2) seleccionar(null);
+          return true;
+        } catch (e: unknown) {
+          avisar(e instanceof ErrorRpc ? e.message : "No se pudo desactivar el garzón");
+          return false;
         }
       },
 
@@ -677,6 +871,19 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
             totalAbonos: 0,
             saldoFinal: 0,
           };
+          const mesa = estadoRef.current.mesas.find((m) => m.id === mesaId);
+          if (!mesa || mesa.estado === "OCUPADA") return null;
+          auditarLocal({
+            usuarioId: garzon,
+            accion: "APERTURA_MESA",
+            entidad: "atenciones",
+            entidadId: atencion.id,
+            mesaNumero: mesa.numero,
+            atencionId: atencion.id,
+            valorAnterior: { estadoMesa: "DISPONIBLE" },
+            valorNuevo: { estadoMesa: "OCUPADA", atencion: numero },
+            observacion: "",
+          });
           dispatch({ tipo: "ABRIR_ATENCION", atencion });
           return atencion.id;
         }
@@ -696,6 +903,32 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
 
       agregarProducto(atencionId, productoId) {
         const producto = getProducto(productoId);
+        const atencion = estadoRef.current.atenciones[atencionId];
+        if (atencion?.estado === "PENDIENTE") {
+          const previo = estadoRef.current.consumos.find(
+            (c) => c.atencionId === atencionId && c.productoId === productoId
+          );
+          const cantidad = Math.min((previo?.cantidad ?? 0) + 1, 99);
+          if (!previo || cantidad !== previo.cantidad) {
+            auditarLocal({
+              usuarioId: garzonRef.current,
+              accion: previo ? "MODIFICAR_CANTIDAD" : "AGREGAR_PRODUCTO",
+              entidad: "consumos",
+              entidadId: previo?.id ?? `c-${atencionId}-${productoId}`,
+              mesaNumero: numeroDeMesa(atencion.mesaId),
+              atencionId,
+              valorAnterior: previo ? { cantidad: previo.cantidad } : null,
+              valorNuevo: previo
+                ? { producto: producto.nombre, cantidad }
+                : {
+                    producto: producto.nombre,
+                    cantidad: 1,
+                    precioUnitario: producto.precio,
+                  },
+              observacion: previo ? producto.nombre : "",
+            });
+          }
+        }
         optimista(
           { tipo: "AGREGAR_PRODUCTO", atencionId, productoId },
           atencionId,
@@ -703,8 +936,10 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
             rpc("agregar_consumo", {
               p_atencion_id: atencionId,
               p_producto_id: productoId,
+              p_producto_nombre: producto.nombre,
               p_precio_unitario: producto.precio,
               p_delta: 1,
+              p_garzon_id: garzonRef.current,
             })
         );
       },
@@ -712,6 +947,24 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
       cambiarCantidad(atencionId, consumoId, delta) {
         const consumo = estadoRef.current.consumos.find((c) => c.id === consumoId);
         if (!consumo) return;
+        const producto = getProducto(consumo.productoId);
+        const atencion = estadoRef.current.atenciones[atencionId];
+        if (atencion?.estado === "PENDIENTE") {
+          const cantidad = Math.min(Math.max(consumo.cantidad + delta, 1), 99);
+          if (cantidad !== consumo.cantidad) {
+            auditarLocal({
+              usuarioId: garzonRef.current,
+              accion: "MODIFICAR_CANTIDAD",
+              entidad: "consumos",
+              entidadId: consumoId,
+              mesaNumero: numeroDeMesa(atencion.mesaId),
+              atencionId,
+              valorAnterior: { cantidad: consumo.cantidad },
+              valorNuevo: { producto: producto.nombre, cantidad },
+              observacion: producto.nombre,
+            });
+          }
+        }
         optimista(
           { tipo: "CAMBIAR_CANTIDAD", atencionId, consumoId, delta },
           atencionId,
@@ -719,8 +972,10 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
             rpc("agregar_consumo", {
               p_atencion_id: atencionId,
               p_producto_id: consumo.productoId,
+              p_producto_nombre: producto.nombre,
               p_precio_unitario: consumo.precioUnitario,
               p_delta: delta,
+              p_garzon_id: garzonRef.current,
             })
         );
       },
@@ -728,6 +983,25 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
       eliminarConsumo(atencionId, consumoId) {
         const consumo = estadoRef.current.consumos.find((c) => c.id === consumoId);
         if (!consumo) return;
+        const producto = getProducto(consumo.productoId);
+        const atencion = estadoRef.current.atenciones[atencionId];
+        if (atencion?.estado === "PENDIENTE") {
+          auditarLocal({
+            usuarioId: garzonRef.current,
+            accion: "ELIMINAR_PRODUCTO",
+            entidad: "consumos",
+            entidadId: consumoId,
+            mesaNumero: numeroDeMesa(atencion.mesaId),
+            atencionId,
+            valorAnterior: {
+              producto: producto.nombre,
+              cantidad: consumo.cantidad,
+              subtotal: consumo.subtotal,
+            },
+            valorNuevo: null,
+            observacion: "",
+          });
+        }
         optimista(
           { tipo: "ELIMINAR_CONSUMO", atencionId, consumoId },
           atencionId,
@@ -735,11 +1009,30 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
             rpc("eliminar_consumo", {
               p_atencion_id: atencionId,
               p_producto_id: consumo.productoId,
+              p_producto_nombre: producto.nombre,
+              p_garzon_id: garzonRef.current,
             })
         );
       },
 
       fijarMenu(atencionId, menu) {
+        const atencion = estadoRef.current.atenciones[atencionId];
+        if (atencion?.estado === "PENDIENTE") {
+          auditarLocal({
+            usuarioId: garzonRef.current,
+            accion: "FIJAR_MENU",
+            entidad: "atenciones",
+            entidadId: atencionId,
+            mesaNumero: numeroDeMesa(atencion.mesaId),
+            atencionId,
+            valorAnterior: {
+              menu: atencion.menu?.menuId ?? null,
+              totalMenu: atencion.totalMenu,
+            },
+            valorNuevo: { menu: menu?.menuId ?? null, totalMenu: totalMenu(menu) },
+            observacion: "",
+          });
+        }
         optimista({ tipo: "FIJAR_MENU", atencionId, menu }, atencionId, () =>
           rpc("fijar_menu", {
             p_atencion_id: atencionId,
@@ -748,6 +1041,7 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
             p_ninos_6_11: menu?.ninos6a11 ?? 0,
             p_ninos_3_5: menu?.ninos3a5 ?? 0,
             p_total_menu: totalMenu(menu),
+            p_garzon_id: garzonRef.current,
           })
         );
       },
@@ -760,17 +1054,26 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
         if (!MODO_COMPARTIDO) {
           const atencion = estadoRef.current.atenciones[atencionId];
           if (!atencion || atencion.estado !== "PENDIENTE") return false;
-          dispatch({
-            tipo: "APLICAR_ABONO",
-            abono: {
-              id: `ab-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
-              atencionId,
-              monto: Math.round(monto),
-              observacion: observacion.trim().slice(0, 120),
-              garzonId: garzonRef.current,
-              creadoEn: new Date().toISOString(),
-            },
+          const abono: Abono = {
+            id: `ab-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+            atencionId,
+            monto: Math.round(monto),
+            observacion: observacion.trim().slice(0, 120),
+            garzonId: garzonRef.current,
+            creadoEn: new Date().toISOString(),
+          };
+          auditarLocal({
+            usuarioId: garzonRef.current,
+            accion: "REGISTRAR_ABONO",
+            entidad: "abonos",
+            entidadId: abono.id,
+            mesaNumero: numeroDeMesa(atencion.mesaId),
+            atencionId,
+            valorAnterior: null,
+            valorNuevo: { monto: abono.monto, observacion: abono.observacion },
+            observacion: abono.observacion,
           });
+          dispatch({ tipo: "APLICAR_ABONO", abono });
           return true;
         }
         if (sinConexion()) return false;
@@ -796,12 +1099,26 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
         if (!MODO_COMPARTIDO) {
           const atencion = estadoRef.current.atenciones[abono.atencionId];
           if (!atencion || atencion.estado !== "PENDIENTE") return;
+          auditarLocal({
+            usuarioId: garzonRef.current,
+            accion: "ELIMINAR_ABONO",
+            entidad: "abonos",
+            entidadId: abonoId,
+            mesaNumero: numeroDeMesa(atencion.mesaId),
+            atencionId: abono.atencionId,
+            valorAnterior: { monto: abono.monto, observacion: abono.observacion },
+            valorNuevo: null,
+            observacion: "",
+          });
           dispatch({ tipo: "QUITAR_ABONO", abonoId });
           return;
         }
         if (sinConexion()) return;
         try {
-          await rpc("eliminar_abono", { p_abono_id: abonoId });
+          await rpc("eliminar_abono", {
+            p_abono_id: abonoId,
+            p_garzon_id: garzonRef.current,
+          });
           dispatch({ tipo: "QUITAR_ABONO", abonoId });
         } catch (e: unknown) {
           avisar(e instanceof ErrorRpc ? e.message : "No se pudo eliminar el abono");
@@ -811,12 +1128,34 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
 
       async cerrarAtencion(atencionId) {
         if (!MODO_COMPARTIDO) {
+          const atencion = estadoRef.current.atenciones[atencionId];
+          if (atencion?.estado === "PENDIENTE") {
+            auditarLocal({
+              usuarioId: garzonRef.current,
+              accion: "CIERRE_MESA",
+              entidad: "atenciones",
+              entidadId: atencionId,
+              mesaNumero: numeroDeMesa(atencion.mesaId),
+              atencionId,
+              valorAnterior: { estado: "PENDIENTE" },
+              valorNuevo: {
+                estado: "PAGADA",
+                total: totalCuenta(atencion),
+                abonos: atencion.totalAbonos,
+                saldo: saldoPendiente(atencion),
+              },
+              observacion: "",
+            });
+          }
           dispatch({ tipo: "CERRAR_ATENCION", atencionId });
           return true;
         }
         if (sinConexion()) return false;
         try {
-          await rpcAtencionMesa("cerrar_atencion", { p_atencion_id: atencionId });
+          await rpcAtencionMesa("cerrar_atencion", {
+            p_atencion_id: atencionId,
+            p_garzon_id: garzonRef.current,
+          });
           return true;
         } catch (e: unknown) {
           avisar(
@@ -829,12 +1168,41 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
 
       async reabrirAtencion(atencionId) {
         if (!MODO_COMPARTIDO) {
+          const atencion = estadoRef.current.atenciones[atencionId];
+          const mesa = atencion
+            ? estadoRef.current.mesas.find((m) => m.id === atencion.mesaId)
+            : undefined;
+          const esUltima =
+            atencion &&
+            !Object.values(estadoRef.current.atenciones).some(
+              (a) => a.mesaId === atencion.mesaId && a.numero > atencion.numero
+            );
+          if (
+            atencion?.estado === "PAGADA" &&
+            mesa?.estado === "DISPONIBLE" &&
+            esUltima
+          ) {
+            auditarLocal({
+              usuarioId: garzonRef.current,
+              accion: "REAPERTURA_MESA",
+              entidad: "atenciones",
+              entidadId: atencionId,
+              mesaNumero: mesa.numero,
+              atencionId,
+              valorAnterior: { estado: "PAGADA" },
+              valorNuevo: { estado: "PENDIENTE" },
+              observacion: "",
+            });
+          }
           dispatch({ tipo: "REABRIR_ATENCION", atencionId });
           return true;
         }
         if (sinConexion()) return false;
         try {
-          await rpcAtencionMesa("reabrir_atencion", { p_atencion_id: atencionId });
+          await rpcAtencionMesa("reabrir_atencion", {
+            p_atencion_id: atencionId,
+            p_garzon_id: garzonRef.current,
+          });
           return true;
         } catch (e: unknown) {
           avisar(
@@ -844,8 +1212,89 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
           return false;
         }
       },
+
+      async transferirAtencion(atencionId, garzonNuevoId) {
+        if (!MODO_COMPARTIDO) {
+          const atencion = estadoRef.current.atenciones[atencionId];
+          if (!atencion || atencion.estado !== "PENDIENTE") return false;
+          if (atencion.garzonId === garzonNuevoId) return true;
+          const nombreDe = (id: string | null) =>
+            estadoRef.current.garzones.find((g) => g.id === id)?.nombre ?? "—";
+          auditarLocal({
+            usuarioId: garzonRef.current,
+            accion: "TRANSFERENCIA_MESA",
+            entidad: "atenciones",
+            entidadId: atencionId,
+            mesaNumero: numeroDeMesa(atencion.mesaId),
+            atencionId,
+            valorAnterior: { garzon: nombreDe(atencion.garzonId) },
+            valorNuevo: { garzon: nombreDe(garzonNuevoId) },
+            observacion: "",
+          });
+          dispatch({
+            tipo: "TRANSFERIR_ATENCION",
+            atencionId,
+            garzonId: garzonNuevoId,
+          });
+          return true;
+        }
+        if (sinConexion()) return false;
+        try {
+          const fila = await rpc<FilaAtencion>("transferir_atencion", {
+            p_atencion_id: atencionId,
+            p_garzon_nuevo_id: garzonNuevoId,
+            p_actor_id: garzonRef.current,
+          });
+          dispatch({ tipo: "APLICAR_ATENCION", atencion: mapAtencion(fila) });
+          avisar("Mesa transferida", "exito");
+          return true;
+        } catch (e: unknown) {
+          avisar(e instanceof ErrorRpc ? e.message : "No se pudo transferir la mesa");
+          void revalidarAtencion(atencionId);
+          return false;
+        }
+      },
+
+      registrarPrecuenta(atencionId) {
+        const atencion = estadoRef.current.atenciones[atencionId];
+        if (!atencion) return;
+        if (!MODO_COMPARTIDO) {
+          auditarLocal({
+            usuarioId: garzonRef.current,
+            accion: "GENERAR_PRECUENTA",
+            entidad: "atenciones",
+            entidadId: atencionId,
+            mesaNumero: numeroDeMesa(atencion.mesaId),
+            atencionId,
+            valorAnterior: null,
+            valorNuevo: {
+              total: totalCuenta(atencion),
+              abonos: atencion.totalAbonos,
+              saldo: saldoPendiente(atencion),
+            },
+            observacion: "",
+          });
+          return;
+        }
+        if (conexionRef.current === "online") {
+          void rpc("registrar_precuenta", {
+            p_atencion_id: atencionId,
+            p_garzon_id: garzonRef.current,
+          }).catch(() => undefined);
+        }
+      },
     }),
-    [avisar, optimista, revalidarAtencion, revalidarMesa, rpcAtencionMesa, sinConexion]
+    [
+      auditarLocal,
+      avisar,
+      numeroDeMesa,
+      optimista,
+      revalidarAtencion,
+      revalidarMesa,
+      rpcAtencionMesa,
+      seleccionar,
+      sinConexion,
+    ]
   );
 
   const valorAviso = useMemo(() => ({ aviso, cerrarAviso }), [aviso, cerrarAviso]);

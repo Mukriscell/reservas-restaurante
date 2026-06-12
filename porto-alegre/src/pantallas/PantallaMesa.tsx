@@ -1,16 +1,28 @@
 import { useMemo, useState } from "react";
 import {
   ArrowLeft,
+  ArrowRightLeft,
   CheckCircle2,
   DoorOpen,
+  Download,
+  FileText,
   Lock,
   Plus,
+  Printer,
   Receipt,
   RotateCcw,
+  Share2,
   Sparkles,
 } from "lucide-react";
-import type { Abono, Atencion, Consumo, Mesa } from "../tipos";
+import type { Abono, Atencion, Consumo, Garzon, Mesa } from "../tipos";
 import { saldoPendiente, totalCuenta } from "../tipos";
+import {
+  compartirPrecuenta,
+  descargarPrecuenta,
+  generarPrecuenta,
+  imprimirPrecuenta,
+  type DatosPrecuenta,
+} from "../util/precuenta";
 import {
   useAcciones,
   useEstadoApp,
@@ -123,12 +135,24 @@ function VistaCuenta({
 }) {
   const acciones = useAcciones();
   const garzon = useGarzon(atencion.garzonId);
+  const { garzon: garzonActual } = useGarzonActual();
+  const { garzones } = useEstadoApp();
   const [consulta, setConsulta] = useState("");
-  const [confirmando, setConfirmando] = useState(false);
+  const [panel, setPanel] = useState<
+    "cobrar" | "precuenta" | "transferir" | null
+  >(null);
   const [procesando, setProcesando] = useState(false);
 
   const total = totalCuenta(atencion);
   const saldo = saldoPendiente(atencion);
+
+  const candidatosTransferencia = useMemo(
+    () =>
+      garzones
+        .filter((g) => g.activo && g.id !== atencion.garzonId)
+        .sort((a, b) => a.nombre.localeCompare(b.nombre, "es")),
+    [garzones, atencion.garzonId]
+  );
 
   const resultados = useMemo(
     () =>
@@ -149,8 +173,41 @@ function VistaCuenta({
     setProcesando(true);
     const ok = await acciones.cerrarAtencion(atencion.id);
     setProcesando(false);
-    setConfirmando(false);
+    setPanel(null);
     if (ok) onCobrada(atencion.id); // si otro garzón ganó, llega el aviso
+  }
+
+  /** Genera la precuenta PDF y la entrega (descarga/compartir/imprimir). */
+  async function emitirPrecuenta(entrega: "descargar" | "compartir" | "imprimir") {
+    if (procesando) return;
+    setProcesando(true);
+    try {
+      const datos: DatosPrecuenta = {
+        mesaNumero: mesa.numero,
+        garzonNombre: garzon?.nombre ?? garzonActual?.nombre ?? "—",
+        atencion,
+        consumos,
+        abonos,
+      };
+      const blob = await generarPrecuenta(datos);
+      if (entrega === "descargar") {
+        descargarPrecuenta(blob, datos);
+      } else if (entrega === "imprimir") {
+        imprimirPrecuenta(blob);
+      } else if (!(await compartirPrecuenta(blob, datos))) {
+        descargarPrecuenta(blob, datos); // sin Web Share: cae a descarga
+      }
+      acciones.registrarPrecuenta(atencion.id); // GENERAR_PRECUENTA
+    } finally {
+      setProcesando(false);
+    }
+  }
+
+  async function transferir(garzonNuevo: Garzon) {
+    setProcesando(true);
+    const ok = await acciones.transferirAtencion(atencion.id, garzonNuevo.id);
+    setProcesando(false);
+    if (ok) setPanel(null);
   }
 
   return (
@@ -184,13 +241,32 @@ function VistaCuenta({
             >
               <Receipt className="h-4 w-4" /> Desglose
             </button>
-            <button onClick={() => setConfirmando(true)} className="btn btn-verde">
+            <button
+              onClick={() => setPanel(panel === "cobrar" ? null : "cobrar")}
+              className="btn btn-verde"
+            >
               <CheckCircle2 className="h-4 w-4" /> Cobrar mesa
             </button>
           </div>
         </div>
 
-        {confirmando && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            onClick={() => setPanel(panel === "precuenta" ? null : "precuenta")}
+            disabled={!garzonActual}
+            className="btn btn-borde disabled:opacity-40"
+          >
+            <FileText className="h-4 w-4" /> Generar precuenta
+          </button>
+          <button
+            onClick={() => setPanel(panel === "transferir" ? null : "transferir")}
+            className="btn btn-borde"
+          >
+            <ArrowRightLeft className="h-4 w-4" /> Transferir
+          </button>
+        </div>
+
+        {panel === "cobrar" && (
           <div className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl border border-verde-300 bg-verde-50 p-3 dark:border-verde-500/30 dark:bg-verde-500/10">
             <span className="flex-1 text-sm font-semibold text-verde-900 dark:text-verde-200">
               ¿Cobrar la mesa {mesa.numero} por {formatCLP(saldo)}
@@ -207,9 +283,75 @@ function VistaCuenta({
               Confirmar pago
             </button>
             <button
-              onClick={() => setConfirmando(false)}
+              onClick={() => setPanel(null)}
               disabled={procesando}
               className="btn btn-borde"
+            >
+              Volver
+            </button>
+          </div>
+        )}
+
+        {panel === "precuenta" && (
+          <div className="mt-3 rounded-2xl border border-amarillo-300 bg-amarillo-50 p-3 dark:border-amarillo-400/30 dark:bg-amarillo-400/10">
+            <p className="text-sm font-semibold text-amarillo-900 dark:text-amarillo-200">
+              Precuenta de la mesa {mesa.numero} · saldo {formatCLP(saldo)} —
+              PDF listo para entregar al cliente.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                onClick={() => void emitirPrecuenta("descargar")}
+                disabled={procesando}
+                className="btn btn-verde"
+              >
+                <Download className="h-4 w-4" /> Descargar
+              </button>
+              <button
+                onClick={() => void emitirPrecuenta("compartir")}
+                disabled={procesando}
+                className="btn btn-borde"
+              >
+                <Share2 className="h-4 w-4" /> Compartir
+              </button>
+              <button
+                onClick={() => void emitirPrecuenta("imprimir")}
+                disabled={procesando}
+                className="btn btn-borde"
+              >
+                <Printer className="h-4 w-4" /> Imprimir
+              </button>
+              <button
+                onClick={() => setPanel(null)}
+                disabled={procesando}
+                className="btn btn-borde"
+              >
+                Volver
+              </button>
+            </div>
+          </div>
+        )}
+
+        {panel === "transferir" && (
+          <div className="mt-3 rounded-2xl border border-azul-300 bg-azul-50 p-3 dark:border-azul-500/30 dark:bg-azul-500/10">
+            <p className="text-sm font-semibold text-azul-900 dark:text-azul-200">
+              ¿A qué garzón se transfiere la mesa {mesa.numero}?
+            </p>
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {candidatosTransferencia.map((g) => (
+                <button
+                  key={g.id}
+                  onClick={() => void transferir(g)}
+                  disabled={procesando}
+                  className="btn btn-borde justify-start"
+                >
+                  <span className="truncate">{g.nombre}</span>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setPanel(null)}
+              disabled={procesando}
+              className="btn btn-borde mt-2"
             >
               Volver
             </button>

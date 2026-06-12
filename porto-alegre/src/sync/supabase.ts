@@ -4,11 +4,13 @@ import {
 } from "@supabase/supabase-js";
 import type {
   Abono,
+  AccionAuditoria,
   Atencion,
   Consumo,
   Garzon,
   Mesa,
   MenuMesa,
+  RegistroAuditoria,
 } from "../tipos";
 import type { MenuId } from "../data/menus";
 import type { EstadoApp } from "../db/almacen";
@@ -57,6 +59,23 @@ export interface FilaGarzon {
   id: string;
   nombre: string;
   activo: boolean;
+  rol?: "ADMIN" | "GARZON";
+}
+
+export interface FilaAuditoria {
+  id: number;
+  usuario_id: string | null;
+  nombre_usuario: string;
+  rol_usuario: string;
+  accion: AccionAuditoria;
+  entidad: string;
+  entidad_id: string | null;
+  mesa_numero: number | null;
+  atencion_id: string | null;
+  valor_anterior: Record<string, unknown> | null;
+  valor_nuevo: Record<string, unknown> | null;
+  observacion: string;
+  created_at: string;
 }
 
 export interface FilaAtencion {
@@ -110,7 +129,30 @@ export function mapMesa(fila: FilaMesa): Mesa {
 }
 
 export function mapGarzon(fila: FilaGarzon): Garzon {
-  return { id: fila.id, nombre: fila.nombre, activo: fila.activo };
+  return {
+    id: fila.id,
+    nombre: fila.nombre,
+    activo: fila.activo,
+    rol: fila.rol === "ADMIN" ? "ADMIN" : "GARZON",
+  };
+}
+
+export function mapAuditoria(fila: FilaAuditoria): RegistroAuditoria {
+  return {
+    id: String(fila.id),
+    usuarioId: fila.usuario_id,
+    nombreUsuario: fila.nombre_usuario,
+    rolUsuario: fila.rol_usuario,
+    accion: fila.accion,
+    entidad: fila.entidad,
+    entidadId: fila.entidad_id,
+    mesaNumero: fila.mesa_numero,
+    atencionId: fila.atencion_id,
+    valorAnterior: fila.valor_anterior,
+    valorNuevo: fila.valor_nuevo,
+    observacion: fila.observacion,
+    creadoEn: fila.created_at,
+  };
 }
 
 export function mapAtencion(fila: FilaAtencion): Atencion {
@@ -200,6 +242,7 @@ export async function cargarTodo(): Promise<EstadoApp> {
     atenciones: Object.fromEntries(abiertas.map((a) => [a.id, a])),
     consumos,
     abonos,
+    auditoria: [], // en modo compartido la auditoría vive en el servidor
   };
 }
 
@@ -281,6 +324,74 @@ export async function cargarHistorial(
   return (data as FilaAtencion[]).map(mapAtencion);
 }
 
+/** Filtros de la pantalla de auditoría (se aplican en el servidor). */
+export interface FiltroAuditoria {
+  /** Día local "YYYY-MM-DD". */
+  fecha?: string;
+  usuarioId?: string;
+  mesaNumero?: number;
+  accion?: AccionAuditoria;
+  /**
+   * Restricción para garzones (no ADMIN): solo sus propias acciones o
+   * las de sus atenciones.
+   */
+  soloDe?: { garzonId: string; atencionIds: string[] };
+  limite?: number;
+}
+
+/**
+ * Auditoría: SIEMPRE desde la tabla `auditoria` (inalterable), más
+ * recientes primero.
+ */
+export async function consultarAuditoria(
+  filtro: FiltroAuditoria
+): Promise<RegistroAuditoria[]> {
+  const sb = getCliente();
+  let consulta = sb
+    .from("auditoria")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(filtro.limite ?? 200);
+
+  if (filtro.fecha) {
+    const desde = new Date(`${filtro.fecha}T00:00:00`);
+    const hasta = new Date(desde.getTime() + 24 * 60 * 60 * 1000);
+    consulta = consulta
+      .gte("created_at", desde.toISOString())
+      .lt("created_at", hasta.toISOString());
+  }
+  if (filtro.usuarioId) consulta = consulta.eq("usuario_id", filtro.usuarioId);
+  if (filtro.mesaNumero !== undefined) {
+    consulta = consulta.eq("mesa_numero", filtro.mesaNumero);
+  }
+  if (filtro.accion) consulta = consulta.eq("accion", filtro.accion);
+  if (filtro.soloDe) {
+    const { garzonId, atencionIds } = filtro.soloDe;
+    consulta = atencionIds.length
+      ? consulta.or(
+          `usuario_id.eq.${garzonId},atencion_id.in.(${atencionIds.join(",")})`
+        )
+      : consulta.eq("usuario_id", garzonId);
+  }
+
+  const { data, error } = await consulta;
+  if (error) throw error;
+  return (data as FilaAuditoria[]).map(mapAuditoria);
+}
+
+/** Ids de las atenciones de un garzón (para su vista de auditoría). */
+export async function atencionesDeGarzon(garzonId: string): Promise<string[]> {
+  const sb = getCliente();
+  const { data, error } = await sb
+    .from("atenciones")
+    .select("id")
+    .eq("garzon_id", garzonId)
+    .order("numero", { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  return (data as { id: string }[]).map((a) => a.id);
+}
+
 /* ------------------------------- RPC ----------------------------------- */
 
 const MENSAJES: Record<string, string> = {
@@ -293,9 +404,12 @@ const MENSAJES: Record<string, string> = {
   ATENCION_ANTIGUA: "Solo se puede reabrir la última cuenta de la mesa",
   GARZON_INVALIDO: "Selecciona un garzón válido",
   NOMBRE_INVALIDO: "El nombre debe tener entre 2 y 40 caracteres",
+  NOMBRE_DUPLICADO: "Ya existe un garzón con ese nombre",
+  ROL_INVALIDO: "Rol inválido",
   MONTO_INVALIDO: "El monto del abono no es válido",
   ABONO_NO_EXISTE: "El abono ya no existe",
   DELTA_INVALIDO: "Cantidad inválida",
+  ACCION_INVALIDA: "Acción inválida",
 };
 
 export class ErrorRpc extends Error {

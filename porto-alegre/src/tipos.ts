@@ -21,10 +21,14 @@ export interface Mesa {
   atencionActualId: string | null;
 }
 
+export type RolGarzon = "ADMIN" | "GARZON";
+
 export interface Garzon {
   id: string;
   nombre: string;
   activo: boolean;
+  /** ADMIN ve toda la auditoría y gestiona usuarios. */
+  rol: RolGarzon;
 }
 
 /** Menú buffet asignado a la atención (mismo desglose que MESALISTA). */
@@ -74,6 +78,46 @@ export interface Abono {
   monto: number; // CLP
   observacion: string;
   garzonId: string | null;
+  creadoEn: string; // ISO 8601
+}
+
+/* ------------------------------ Auditoría ----------------------------- */
+
+export type AccionAuditoria =
+  | "APERTURA_MESA"
+  | "AGREGAR_PRODUCTO"
+  | "ELIMINAR_PRODUCTO"
+  | "MODIFICAR_CANTIDAD"
+  | "FIJAR_MENU"
+  | "REGISTRAR_ABONO"
+  | "ELIMINAR_ABONO"
+  | "TRANSFERENCIA_MESA"
+  | "CIERRE_MESA"
+  | "REAPERTURA_MESA"
+  | "GENERAR_PRECUENTA"
+  | "LOGIN"
+  | "LOGOUT"
+  | "CREACION_USUARIO"
+  | "MODIFICACION_USUARIO"
+  | "DESACTIVACION_USUARIO";
+
+/**
+ * Registro de auditoría INALTERABLE: nunca se modifica ni se elimina.
+ * Nombre y rol quedan congelados al momento de la acción.
+ */
+export interface RegistroAuditoria {
+  id: string;
+  usuarioId: string | null;
+  nombreUsuario: string;
+  rolUsuario: string;
+  accion: AccionAuditoria;
+  entidad: string;
+  entidadId: string | null;
+  mesaNumero: number | null;
+  atencionId: string | null;
+  valorAnterior: Record<string, unknown> | null;
+  valorNuevo: Record<string, unknown> | null;
+  observacion: string;
   creadoEn: string; // ISO 8601
 }
 

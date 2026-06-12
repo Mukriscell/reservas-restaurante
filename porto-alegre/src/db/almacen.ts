@@ -1,10 +1,19 @@
-import type { Abono, Atencion, Consumo, Garzon, Mesa, MenuMesa } from "../tipos";
+import type {
+  Abono,
+  Atencion,
+  Consumo,
+  Garzon,
+  Mesa,
+  MenuMesa,
+  RegistroAuditoria,
+} from "../tipos";
 import { totalMenu } from "../data/menus";
 
 /**
  * "Base de datos" local de la app: cache en localStorage del dispositivo,
  * con esquema versionado. En modo local es la fuente de verdad (incluido
- * el historial de atenciones); en modo compartido es la vista offline.
+ * el historial de atenciones y la auditoría); en modo compartido es la
+ * vista offline.
  */
 
 export interface EstadoApp {
@@ -15,26 +24,31 @@ export interface EstadoApp {
   consumos: Consumo[];
   abonos: Abono[];
   garzones: Garzon[];
+  /** Auditoría local (en modo compartido vive en el servidor). */
+  auditoria: RegistroAuditoria[];
 }
 
 const CLAVE = "porto-alegre-mesas";
 const CLAVE_GARZON = "porto-alegre-garzon";
-const VERSION = 2;
+const VERSION = 3;
 
 export const TOTAL_MESAS = 100;
+/** Tope de registros de auditoría locales (protege el localStorage). */
+export const MAX_AUDITORIA_LOCAL = 2000;
 
-/** Mismos garzones seed que la migración SQL (modo local). */
+/** Mismos garzones seed que las migraciones SQL (modo local). */
 export const GARZONES_SEED: Garzon[] = [
-  { id: "g-1", nombre: "Juan Pérez", activo: true },
-  { id: "g-2", nombre: "María Silva", activo: true },
-  { id: "g-3", nombre: "Pedro Santos", activo: true },
-  { id: "g-4", nombre: "Ana Souza", activo: true },
-  { id: "g-5", nombre: "Diego Ramírez", activo: true },
-  { id: "g-6", nombre: "Carla Oliveira", activo: true },
-  { id: "g-7", nombre: "Felipe Costa", activo: true },
-  { id: "g-8", nombre: "Valentina Rojas", activo: true },
-  { id: "g-9", nombre: "Lucas Moreira", activo: true },
-  { id: "g-10", nombre: "Camila Duarte", activo: true },
+  { id: "g-admin", nombre: "Administración", activo: true, rol: "ADMIN" },
+  { id: "g-1", nombre: "Juan Pérez", activo: true, rol: "GARZON" },
+  { id: "g-2", nombre: "María Silva", activo: true, rol: "GARZON" },
+  { id: "g-3", nombre: "Pedro Santos", activo: true, rol: "GARZON" },
+  { id: "g-4", nombre: "Ana Souza", activo: true, rol: "GARZON" },
+  { id: "g-5", nombre: "Diego Ramírez", activo: true, rol: "GARZON" },
+  { id: "g-6", nombre: "Carla Oliveira", activo: true, rol: "GARZON" },
+  { id: "g-7", nombre: "Felipe Costa", activo: true, rol: "GARZON" },
+  { id: "g-8", nombre: "Valentina Rojas", activo: true, rol: "GARZON" },
+  { id: "g-9", nombre: "Lucas Moreira", activo: true, rol: "GARZON" },
+  { id: "g-10", nombre: "Camila Duarte", activo: true, rol: "GARZON" },
 ];
 
 /** Seeder: 100 mesas permanentes, todas DISPONIBLES, sin historial. */
@@ -50,6 +64,7 @@ export function estadoInicial(): EstadoApp {
     consumos: [],
     abonos: [],
     garzones: GARZONES_SEED,
+    auditoria: [],
   };
 }
 
@@ -126,17 +141,42 @@ function migrarV1(mesasV1: MesaV1[], consumosV1: ConsumoV1[]): EstadoApp {
 
 /* --------------------------- Carga/guardado --------------------------- */
 
+/** v2 → v3: garzones con rol + cuenta de administración + auditoría. */
+function migrarV2(datos: Record<string, unknown>): EstadoApp {
+  const garzones = (datos.garzones as (Garzon & { rol?: string })[]).map((g) => ({
+    ...g,
+    rol: g.rol === "ADMIN" ? ("ADMIN" as const) : ("GARZON" as const),
+  }));
+  if (!garzones.some((g) => g.id === "g-admin")) {
+    garzones.unshift(GARZONES_SEED[0]);
+  }
+  return {
+    mesas: datos.mesas as Mesa[],
+    atenciones: datos.atenciones as Record<string, Atencion>,
+    consumos: datos.consumos as Consumo[],
+    abonos: datos.abonos as Abono[],
+    garzones,
+    auditoria: Array.isArray(datos.auditoria)
+      ? (datos.auditoria as RegistroAuditoria[])
+      : [],
+  };
+}
+
 export function cargarEstado(): EstadoApp {
   try {
     const crudo = localStorage.getItem(CLAVE);
     if (!crudo) return estadoInicial();
-    const datos = JSON.parse(crudo) as { version: number } & Record<string, unknown>;
+    let datos = JSON.parse(crudo) as { version: number } & Record<string, unknown>;
 
     if (datos.version === 1) {
-      const migrado = migrarV1(
+      const v2 = migrarV1(
         (datos.mesas as MesaV1[]) ?? [],
         (datos.consumos as ConsumoV1[]) ?? []
       );
+      datos = { version: 2, ...v2 } as { version: number } & Record<string, unknown>;
+    }
+    if (datos.version === 2 && Array.isArray(datos.mesas)) {
+      const migrado = migrarV2(datos);
       guardarEstado(migrado);
       return migrado;
     }
@@ -148,7 +188,8 @@ export function cargarEstado(): EstadoApp {
       typeof datos.atenciones !== "object" ||
       !Array.isArray(datos.consumos) ||
       !Array.isArray(datos.abonos) ||
-      !Array.isArray(datos.garzones)
+      !Array.isArray(datos.garzones) ||
+      !Array.isArray(datos.auditoria)
     ) {
       return estadoInicial();
     }
@@ -158,6 +199,7 @@ export function cargarEstado(): EstadoApp {
       consumos: datos.consumos as Consumo[],
       abonos: datos.abonos as Abono[],
       garzones: datos.garzones as Garzon[],
+      auditoria: datos.auditoria as RegistroAuditoria[],
     };
   } catch {
     return estadoInicial();
