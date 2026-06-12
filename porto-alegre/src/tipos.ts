@@ -29,6 +29,10 @@ export interface Garzon {
   activo: boolean;
   /** ADMIN ve toda la auditoría y gestiona usuarios. */
   rol: RolGarzon;
+  /** Cuenta de Supabase Auth enlazada (modo compartido). */
+  authUserId?: string | null;
+  email?: string | null;
+  telefono?: string | null;
 }
 
 /** Menú buffet asignado a la atención (mismo desglose que MESALISTA). */
@@ -99,7 +103,10 @@ export type AccionAuditoria =
   | "LOGOUT"
   | "CREACION_USUARIO"
   | "MODIFICACION_USUARIO"
-  | "DESACTIVACION_USUARIO";
+  | "DESACTIVACION_USUARIO"
+  | "REGISTRO_USUARIO"
+  | "INICIO_SESION"
+  | "CIERRE_SESION";
 
 /**
  * Registro de auditoría INALTERABLE: nunca se modifica ni se elimina.

@@ -40,10 +40,87 @@ export function getCliente(): SupabaseClient {
   if (!cliente) {
     if (!MODO_COMPARTIDO) throw new Error("Supabase no está configurado");
     cliente = createClient(URL_SUPABASE!, CLAVE_ANON!, {
-      auth: { persistSession: false },
+      // Sesión por mesero: persistida en el dispositivo y renovada sola.
+      // detectSessionInUrl procesa el enlace de recuperar contraseña.
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+      },
     });
   }
   return cliente;
+}
+
+/* --------------------- Autenticación (Supabase Auth) ------------------ */
+
+const ERRORES_AUTH: [RegExp, string][] = [
+  [/invalid login credentials/i, "Correo o contraseña incorrectos"],
+  [/email not confirmed/i, "Confirma tu correo antes de iniciar sesión"],
+  [/user already registered/i, "Ese correo ya está registrado"],
+  [/password should be at least/i, "La contraseña debe tener al menos 6 caracteres"],
+  [/unable to validate email|invalid email/i, "El correo no es válido"],
+  [/rate limit|too many requests/i, "Demasiados intentos: espera un momento"],
+];
+
+function traducirErrorAuth(mensaje: string | undefined): string {
+  for (const [patron, texto] of ERRORES_AUTH) {
+    if (mensaje && patron.test(mensaje)) return texto;
+  }
+  return "No se pudo completar la operación: revisa la conexión";
+}
+
+/** Inicia sesión; devuelve null si todo salió bien o el error legible. */
+export async function iniciarSesion(
+  email: string,
+  contrasena: string
+): Promise<string | null> {
+  const { error } = await getCliente().auth.signInWithPassword({
+    email: email.trim(),
+    password: contrasena,
+  });
+  return error ? traducirErrorAuth(error.message) : null;
+}
+
+/**
+ * Registra al mesero (nombre completo + correo + contraseña, teléfono
+ * opcional). El perfil en `garzones` lo crea un trigger del esquema con
+ * rol GARZON y queda auditado (REGISTRO_USUARIO).
+ */
+export async function registrarse(
+  nombre: string,
+  email: string,
+  contrasena: string,
+  telefono: string
+): Promise<{ error: string | null; requiereConfirmacion: boolean }> {
+  const { data, error } = await getCliente().auth.signUp({
+    email: email.trim(),
+    password: contrasena,
+    options: {
+      data: {
+        nombre_completo: nombre.trim(),
+        telefono: telefono.trim() || null,
+      },
+    },
+  });
+  if (error) return { error: traducirErrorAuth(error.message), requiereConfirmacion: false };
+  return { error: null, requiereConfirmacion: !data.session };
+}
+
+export async function cerrarSesionAuth(): Promise<void> {
+  await getCliente().auth.signOut();
+}
+
+export async function recuperarContrasena(email: string): Promise<string | null> {
+  const { error } = await getCliente().auth.resetPasswordForEmail(email.trim(), {
+    redirectTo: window.location.origin,
+  });
+  return error ? traducirErrorAuth(error.message) : null;
+}
+
+export async function actualizarContrasena(nueva: string): Promise<string | null> {
+  const { error } = await getCliente().auth.updateUser({ password: nueva });
+  return error ? traducirErrorAuth(error.message) : null;
 }
 
 /* ------------------------- Mapeo de filas ----------------------------- */
@@ -60,6 +137,9 @@ export interface FilaGarzon {
   nombre: string;
   activo: boolean;
   rol?: "ADMIN" | "GARZON";
+  auth_user_id?: string | null;
+  email?: string | null;
+  telefono?: string | null;
 }
 
 export interface FilaAuditoria {
@@ -134,6 +214,9 @@ export function mapGarzon(fila: FilaGarzon): Garzon {
     nombre: fila.nombre,
     activo: fila.activo,
     rol: fila.rol === "ADMIN" ? "ADMIN" : "GARZON",
+    authUserId: fila.auth_user_id ?? null,
+    email: fila.email ?? null,
+    telefono: fila.telefono ?? null,
   };
 }
 
@@ -410,6 +493,9 @@ const MENSAJES: Record<string, string> = {
   ABONO_NO_EXISTE: "El abono ya no existe",
   DELTA_INVALIDO: "Cantidad inválida",
   ACCION_INVALIDA: "Acción inválida",
+  NO_AUTENTICADO: "Tu sesión expiró: vuelve a iniciar sesión",
+  USUARIO_DESACTIVADO: "Tu cuenta está desactivada: habla con el administrador",
+  SOLO_ADMIN: "Solo un ADMIN puede hacer eso",
 };
 
 export class ErrorRpc extends Error {

@@ -19,6 +19,9 @@ export const ETIQUETAS_ACCION: Record<AccionAuditoria, string> = {
   CREACION_USUARIO: "Creación de usuario",
   MODIFICACION_USUARIO: "Modificación de usuario",
   DESACTIVACION_USUARIO: "Desactivación de usuario",
+  REGISTRO_USUARIO: "Registro de usuario",
+  INICIO_SESION: "Inicio de sesión",
+  CIERRE_SESION: "Cierre de sesión",
 };
 
 function num(v: unknown): number | null {
@@ -83,9 +86,15 @@ export function descripcionAuditoria(r: RegistroAuditoria): string {
       return saldo !== null ? `Saldo ${formatCLP(saldo)}` : "Precuenta emitida";
     }
     case "LOGIN":
-      return "Inicio de turno en el dispositivo";
+    case "INICIO_SESION":
+      return "Inicio de sesión en el dispositivo";
     case "LOGOUT":
-      return "Fin de turno en el dispositivo";
+    case "CIERRE_SESION":
+      return "Cierre de sesión en el dispositivo";
+    case "REGISTRO_USUARIO": {
+      const correo = texto(vn["email"]);
+      return `${texto(vn["nombre"])}${correo ? ` (${correo})` : ""} se registró`;
+    }
     case "CREACION_USUARIO":
       return texto(vn["nombre"]);
     case "MODIFICACION_USUARIO": {

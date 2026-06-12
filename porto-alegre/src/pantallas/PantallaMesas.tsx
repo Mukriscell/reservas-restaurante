@@ -1,5 +1,7 @@
-import { History, Martini, ScrollText, UserRound } from "lucide-react";
-import { useEstadoApp, useGarzonActual } from "../estado/contexto";
+import { useMemo, useState } from "react";
+import { History, LogOut, Martini, ScrollText, UserRound } from "lucide-react";
+import { useAcciones, useEstadoApp, useGarzonActual } from "../estado/contexto";
+import { MODO_COMPARTIDO } from "../sync/supabase";
 import { TarjetaMesa } from "../componentes/TarjetaMesa";
 import { PillConexion } from "../componentes/Conexion";
 import { BotonTema } from "../componentes/BotonTema";
@@ -19,7 +21,18 @@ export function PantallaMesas({
   onCambiarGarzon: () => void;
 }) {
   const { mesas, atenciones, garzones } = useEstadoApp();
-  const { garzon } = useGarzonActual();
+  const { garzonId, garzon } = useGarzonActual();
+  const acciones = useAcciones();
+  // "Mis mesas": el garzón filtra la grilla a sus atenciones abiertas.
+  const [soloMias, setSoloMias] = useState(false);
+
+  const visibles = useMemo(() => {
+    if (!soloMias || !garzonId) return mesas;
+    return mesas.filter((m) => {
+      const atencion = m.atencionActualId ? atenciones[m.atencionActualId] : null;
+      return atencion?.garzonId === garzonId;
+    });
+  }, [soloMias, garzonId, mesas, atenciones]);
 
   return (
     <div className="mx-auto max-w-5xl px-3 pb-10">
@@ -55,6 +68,16 @@ export function PantallaMesas({
             <ScrollText className="h-4 w-4" /> Auditoría
           </button>
           <span className="flex-1" />
+          {MODO_COMPARTIDO && (
+            <button
+              onClick={() => void acciones.cerrarSesion()}
+              aria-label="Cerrar sesión"
+              title="Cerrar sesión"
+              className="btn btn-borde !px-3"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
         <p className="mt-3 flex gap-4 text-xs font-medium text-zinc-500 dark:text-zinc-400">
@@ -70,11 +93,29 @@ export function PantallaMesas({
             <span className="h-2.5 w-2.5 rounded-full bg-azul-700 dark:bg-azul-400" />
             Seleccionada
           </span>
+          <button
+            onClick={() => setSoloMias((v) => !v)}
+            aria-pressed={soloMias}
+            className={`ml-auto rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-wide transition ${
+              soloMias
+                ? "bg-azul-700 text-white dark:bg-azul-500"
+                : "bg-zinc-200 text-zinc-600 dark:bg-white/10 dark:text-zinc-300"
+            }`}
+          >
+            Mis mesas
+          </button>
         </p>
       </header>
 
+      {visibles.length === 0 && (
+        <p className="tarjeta p-5 text-center text-sm text-zinc-500 dark:text-zinc-400">
+          No tienes mesas abiertas a tu nombre: desactiva “Mis mesas” para
+          ver las 100 mesas y abrir una atención.
+        </p>
+      )}
+
       <div className="grid grid-cols-4 gap-2.5 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10">
-        {mesas.map((mesa) => {
+        {visibles.map((mesa) => {
           const atencion = mesa.atencionActualId
             ? atenciones[mesa.atencionActualId] ?? null
             : null;

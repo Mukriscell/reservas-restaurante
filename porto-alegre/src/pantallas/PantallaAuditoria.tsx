@@ -31,6 +31,9 @@ function clasePill(accion: AccionAuditoria): string {
       return "bg-amarillo-100 text-amarillo-900 dark:bg-amarillo-400/15 dark:text-amarillo-300";
     case "LOGIN":
     case "LOGOUT":
+    case "INICIO_SESION":
+    case "CIERRE_SESION":
+    case "REGISTRO_USUARIO":
     case "CREACION_USUARIO":
     case "MODIFICACION_USUARIO":
     case "TRANSFERENCIA_MESA":

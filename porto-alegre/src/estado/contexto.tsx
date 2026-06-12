@@ -34,6 +34,11 @@ import {
 import {
   MODO_COMPARTIDO,
   ErrorRpc,
+  actualizarContrasena as authActualizarContrasena,
+  cerrarSesionAuth,
+  iniciarSesion as authIniciarSesion,
+  recuperarContrasena as authRecuperarContrasena,
+  registrarse as authRegistrarse,
   cargarAtencion,
   cargarHistorial as consultarHistorial,
   cargarMesa,
@@ -414,12 +419,37 @@ export interface AccionesApp {
   desactivarGarzon(garzonId: string): Promise<boolean>;
   /** Deja constancia GENERAR_PRECUENTA en la auditoría. */
   registrarPrecuenta(atencionId: string): void;
+  /* ------ Autenticación por mesero (modo compartido, Supabase Auth) ----- */
+  /** null si entró bien; si no, el error legible. Audita INICIO_SESION. */
+  iniciarSesion(email: string, contrasena: string): Promise<string | null>;
+  registrarse(
+    nombre: string,
+    email: string,
+    contrasena: string,
+    telefono: string
+  ): Promise<{ error: string | null; requiereConfirmacion: boolean }>;
+  /** Audita CIERRE_SESION y cierra la sesión de Supabase. */
+  cerrarSesion(): Promise<void>;
+  recuperarContrasena(email: string): Promise<string | null>;
+  actualizarContrasena(nueva: string): Promise<string | null>;
+}
+
+/** Sesión del mesero en este dispositivo (modo compartido). */
+export interface EstadoAuth {
+  /** true mientras Supabase restaura la sesión persistida. */
+  cargando: boolean;
+  userId: string | null;
+  email: string | null;
+  /** El usuario llegó desde un enlace de recuperar contraseña. */
+  recuperando: boolean;
+  terminarRecuperacion(): void;
 }
 
 const CtxEstado = createContext<EstadoApp | null>(null);
 const CtxAcciones = createContext<AccionesApp | null>(null);
 const CtxConexion = createContext<EstadoConexion>("local");
 const CtxGarzon = createContext<string | null>(null);
+const CtxAuth = createContext<EstadoAuth | null>(null);
 const CtxRevalidar = createContext<((atencionId: string) => Promise<void>) | null>(
   null
 );
@@ -434,8 +464,18 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
   const [conexion, setConexion] = useState<EstadoConexion>(
     MODO_COMPARTIDO ? "conectando" : "local"
   );
-  const [garzonId, setGarzonId] = useState<string | null>(cargarGarzonId);
+  // Modo local: garzón elegido en el dispositivo. Modo compartido: se
+  // deriva del perfil de la sesión autenticada (Supabase Auth).
+  const [garzonId, setGarzonId] = useState<string | null>(
+    MODO_COMPARTIDO ? null : cargarGarzonId
+  );
   const [aviso, setAviso] = useState<AvisoApp | null>(null);
+  const [sesion, setSesion] = useState<{
+    cargando: boolean;
+    userId: string | null;
+    email: string | null;
+    recuperando: boolean;
+  }>({ cargando: MODO_COMPARTIDO, userId: null, email: null, recuperando: false });
 
   const estadoRef = useRef(estado);
   estadoRef.current = estado;
@@ -454,9 +494,52 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
   }, []);
   const cerrarAviso = useCallback(() => setAviso(null), []);
 
+  /* ----------------- Sesión por mesero (Supabase Auth) ----------------- */
+  useEffect(() => {
+    if (!MODO_COMPARTIDO) return;
+    let activo = true;
+    const sb = getCliente();
+    void sb.auth.getSession().then(({ data }) => {
+      if (!activo) return;
+      setSesion((s) => ({
+        ...s,
+        cargando: false,
+        userId: data.session?.user.id ?? null,
+        email: data.session?.user.email ?? null,
+      }));
+    });
+    const { data: suscripcion } = sb.auth.onAuthStateChange((evento, datos) => {
+      if (!activo) return;
+      setSesion((s) => ({
+        cargando: false,
+        userId: datos?.user.id ?? null,
+        email: datos?.user.email ?? null,
+        recuperando: evento === "PASSWORD_RECOVERY" ? true : s.recuperando,
+      }));
+    });
+    return () => {
+      activo = false;
+      suscripcion.subscription.unsubscribe();
+    };
+  }, []);
+
+  // El garzón del dispositivo ES el perfil de la cuenta autenticada.
+  useEffect(() => {
+    if (!MODO_COMPARTIDO) return;
+    const perfil = estado.garzones.find(
+      (g) => g.authUserId && g.authUserId === sesion.userId
+    );
+    setGarzonId(perfil?.id ?? null);
+  }, [sesion.userId, estado.garzones]);
+
   /* ------------------ Realtime + carga inicial (compartido) ------------ */
   useEffect(() => {
     if (!MODO_COMPARTIDO) return;
+    // Sin sesión no hay lecturas (RLS): el canal se monta al autenticarse.
+    if (!sesion.userId) {
+      setConexion("conectando");
+      return;
+    }
     let activo = true;
 
     const refrescar = () => {
@@ -556,7 +639,7 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
       window.removeEventListener("offline", alCaer);
       void getCliente().removeChannel(canal);
     };
-  }, []);
+  }, [sesion.userId]);
 
   /* --------------------------- Mutaciones ------------------------------ */
 
@@ -676,21 +759,19 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
     return estadoRef.current.mesas.find((m) => m.id === mesaId)?.numero ?? null;
   }, []);
 
-  /** LOGIN/LOGOUT del garzón de este dispositivo, con auditoría. */
+  /**
+   * Cambio de garzón del dispositivo (SOLO modo local; en compartido la
+   * identidad sale de la sesión autenticada). Audita inicio/cierre.
+   */
   const seleccionar = useCallback(
     (nuevo: string | null) => {
+      if (MODO_COMPARTIDO) return;
       const anterior = garzonRef.current;
       if (anterior === nuevo) return;
-      const sesion = (garzonId2: string, accion: "LOGIN" | "LOGOUT") => {
-        if (MODO_COMPARTIDO) {
-          if (conexionRef.current === "online") {
-            void rpc("registrar_sesion", {
-              p_garzon_id: garzonId2,
-              p_accion: accion,
-            }).catch(() => undefined);
-          }
-          return;
-        }
+      const auditarSesion = (
+        garzonId2: string,
+        accion: "INICIO_SESION" | "CIERRE_SESION"
+      ) => {
         auditarLocal({
           usuarioId: garzonId2,
           accion,
@@ -703,8 +784,8 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
           observacion: "",
         });
       };
-      if (anterior) sesion(anterior, "LOGOUT");
-      if (nuevo) sesion(nuevo, "LOGIN");
+      if (anterior) auditarSesion(anterior, "CIERRE_SESION");
+      if (nuevo) auditarSesion(nuevo, "INICIO_SESION");
       setGarzonId(nuevo);
       guardarGarzonId(nuevo);
     },
@@ -750,10 +831,7 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
         }
         if (sinConexion()) return null;
         try {
-          const fila = await rpc<FilaGarzon>("crear_garzon", {
-            p_nombre: limpio,
-            p_actor_id: garzonRef.current,
-          });
+          const fila = await rpc<FilaGarzon>("crear_garzon", { p_nombre: limpio });
           const garzon = mapGarzon(fila);
           dispatch({ tipo: "APLICAR_GARZON", garzon });
           return garzon;
@@ -802,7 +880,6 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
             p_garzon_id: garzonId2,
             p_nombre: limpio,
             p_rol: rol,
-            p_actor_id: garzonRef.current,
           });
           dispatch({ tipo: "APLICAR_GARZON", garzon: mapGarzon(fila) });
           return true;
@@ -835,7 +912,6 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
         try {
           const fila = await rpc<FilaGarzon>("desactivar_garzon", {
             p_garzon_id: garzonId2,
-            p_actor_id: garzonRef.current,
           });
           dispatch({ tipo: "APLICAR_GARZON", garzon: mapGarzon(fila) });
           if (garzonRef.current === garzonId2) seleccionar(null);
@@ -889,10 +965,7 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
         }
         if (sinConexion()) return null;
         try {
-          const atencion = await rpcAtencionMesa("abrir_atencion", {
-            p_mesa_id: mesaId,
-            p_garzon_id: garzon,
-          });
+          const atencion = await rpcAtencionMesa("abrir_atencion", { p_mesa_id: mesaId });
           return atencion?.id ?? null;
         } catch (e: unknown) {
           avisar(e instanceof ErrorRpc ? e.message : "No se pudo abrir la atención");
@@ -939,7 +1012,6 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
               p_producto_nombre: producto.nombre,
               p_precio_unitario: producto.precio,
               p_delta: 1,
-              p_garzon_id: garzonRef.current,
             })
         );
       },
@@ -975,7 +1047,6 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
               p_producto_nombre: producto.nombre,
               p_precio_unitario: consumo.precioUnitario,
               p_delta: delta,
-              p_garzon_id: garzonRef.current,
             })
         );
       },
@@ -1010,7 +1081,6 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
               p_atencion_id: atencionId,
               p_producto_id: consumo.productoId,
               p_producto_nombre: producto.nombre,
-              p_garzon_id: garzonRef.current,
             })
         );
       },
@@ -1041,7 +1111,6 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
             p_ninos_6_11: menu?.ninos6a11 ?? 0,
             p_ninos_3_5: menu?.ninos3a5 ?? 0,
             p_total_menu: totalMenu(menu),
-            p_garzon_id: garzonRef.current,
           })
         );
       },
@@ -1082,7 +1151,6 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
             p_atencion_id: atencionId,
             p_monto: Math.round(monto),
             p_observacion: observacion,
-            p_garzon_id: garzonRef.current,
           });
           dispatch({ tipo: "APLICAR_ABONO", abono: mapAbono(fila) });
           return true;
@@ -1115,10 +1183,7 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
         }
         if (sinConexion()) return;
         try {
-          await rpc("eliminar_abono", {
-            p_abono_id: abonoId,
-            p_garzon_id: garzonRef.current,
-          });
+          await rpc("eliminar_abono", { p_abono_id: abonoId });
           dispatch({ tipo: "QUITAR_ABONO", abonoId });
         } catch (e: unknown) {
           avisar(e instanceof ErrorRpc ? e.message : "No se pudo eliminar el abono");
@@ -1152,10 +1217,7 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
         }
         if (sinConexion()) return false;
         try {
-          await rpcAtencionMesa("cerrar_atencion", {
-            p_atencion_id: atencionId,
-            p_garzon_id: garzonRef.current,
-          });
+          await rpcAtencionMesa("cerrar_atencion", { p_atencion_id: atencionId });
           return true;
         } catch (e: unknown) {
           avisar(
@@ -1199,10 +1261,7 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
         }
         if (sinConexion()) return false;
         try {
-          await rpcAtencionMesa("reabrir_atencion", {
-            p_atencion_id: atencionId,
-            p_garzon_id: garzonRef.current,
-          });
+          await rpcAtencionMesa("reabrir_atencion", { p_atencion_id: atencionId });
           return true;
         } catch (e: unknown) {
           avisar(
@@ -1243,7 +1302,6 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
           const fila = await rpc<FilaAtencion>("transferir_atencion", {
             p_atencion_id: atencionId,
             p_garzon_nuevo_id: garzonNuevoId,
-            p_actor_id: garzonRef.current,
           });
           dispatch({ tipo: "APLICAR_ATENCION", atencion: mapAtencion(fila) });
           avisar("Mesa transferida", "exito");
@@ -1279,9 +1337,74 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
         if (conexionRef.current === "online") {
           void rpc("registrar_precuenta", {
             p_atencion_id: atencionId,
-            p_garzon_id: garzonRef.current,
           }).catch(() => undefined);
         }
+      },
+
+      /* ----------------- Autenticación (Supabase Auth) ------------------ */
+
+      async iniciarSesion(email, contrasena) {
+        if (!MODO_COMPARTIDO) return "La autenticación requiere Supabase";
+        const error = await authIniciarSesion(email, contrasena);
+        if (error) return error;
+        // INICIO_SESION queda en la auditoría con la identidad del JWT.
+        void rpc("registrar_sesion", { p_accion: "INICIO_SESION" }).catch(
+          () => undefined
+        );
+        return null;
+      },
+
+      async registrarse(nombre, email, contrasena, telefono) {
+        if (!MODO_COMPARTIDO) {
+          return { error: "El registro requiere Supabase", requiereConfirmacion: false };
+        }
+        const limpio = nombre.trim();
+        if (limpio.length < 2 || limpio.length > 40) {
+          return {
+            error: "El nombre debe tener entre 2 y 40 caracteres",
+            requiereConfirmacion: false,
+          };
+        }
+        const resultado = await authRegistrarse(limpio, email, contrasena, telefono);
+        if (!resultado.error && !resultado.requiereConfirmacion) {
+          // Quedó autenticado de inmediato: también es un inicio de sesión.
+          void rpc("registrar_sesion", { p_accion: "INICIO_SESION" }).catch(
+            () => undefined
+          );
+        }
+        return resultado;
+      },
+
+      async cerrarSesion() {
+        if (!MODO_COMPARTIDO) {
+          seleccionar(null);
+          return;
+        }
+        // CIERRE_SESION se audita ANTES de invalidar el token.
+        try {
+          await rpc("registrar_sesion", { p_accion: "CIERRE_SESION" });
+        } catch {
+          // sin conexión o sesión ya inválida: el logout sigue igual
+        }
+        await cerrarSesionAuth();
+      },
+
+      async recuperarContrasena(email) {
+        if (!MODO_COMPARTIDO) return "La recuperación requiere Supabase";
+        return authRecuperarContrasena(email);
+      },
+
+      async actualizarContrasena(nueva) {
+        if (!MODO_COMPARTIDO) return "La autenticación requiere Supabase";
+        if (nueva.length < 6) {
+          return "La contraseña debe tener al menos 6 caracteres";
+        }
+        const error = await authActualizarContrasena(nueva);
+        if (!error) {
+          setSesion((s) => ({ ...s, recuperando: false }));
+          avisar("Contraseña actualizada", "exito");
+        }
+        return error;
       },
     }),
     [
@@ -1299,14 +1422,29 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
 
   const valorAviso = useMemo(() => ({ aviso, cerrarAviso }), [aviso, cerrarAviso]);
 
+  const valorAuth = useMemo<EstadoAuth>(
+    () => ({
+      cargando: sesion.cargando,
+      userId: sesion.userId,
+      email: sesion.email,
+      recuperando: sesion.recuperando,
+      terminarRecuperacion() {
+        setSesion((s) => ({ ...s, recuperando: false }));
+      },
+    }),
+    [sesion]
+  );
+
   return (
     <CtxEstado.Provider value={estado}>
       <CtxAcciones.Provider value={acciones}>
         <CtxConexion.Provider value={conexion}>
           <CtxGarzon.Provider value={garzonId}>
-            <CtxRevalidar.Provider value={revalidarAtencion}>
-              <CtxAviso.Provider value={valorAviso}>{children}</CtxAviso.Provider>
-            </CtxRevalidar.Provider>
+            <CtxAuth.Provider value={valorAuth}>
+              <CtxRevalidar.Provider value={revalidarAtencion}>
+                <CtxAviso.Provider value={valorAviso}>{children}</CtxAviso.Provider>
+              </CtxRevalidar.Provider>
+            </CtxAuth.Provider>
           </CtxGarzon.Provider>
         </CtxConexion.Provider>
       </CtxAcciones.Provider>
@@ -1330,6 +1468,13 @@ export function useAcciones(): AccionesApp {
 
 export function useConexion(): EstadoConexion {
   return useContext(CtxConexion);
+}
+
+/** Sesión del mesero (modo compartido). En modo local, userId es null. */
+export function useAuth(): EstadoAuth {
+  const ctx = useContext(CtxAuth);
+  if (!ctx) throw new Error("useAuth requiere <ProveedorApp>");
+  return ctx;
 }
 
 export function useAviso() {

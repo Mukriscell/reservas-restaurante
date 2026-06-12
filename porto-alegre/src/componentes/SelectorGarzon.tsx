@@ -10,12 +10,15 @@ import {
 } from "lucide-react";
 import type { Garzon, RolGarzon } from "../tipos";
 import { useAcciones, useEstadoApp, useGarzonActual } from "../estado/contexto";
+import { MODO_COMPARTIDO } from "../sync/supabase";
 
 /**
- * Overlay para elegir qué garzón opera este dispositivo (LOGIN/LOGOUT
- * quedan en la auditoría). Si el usuario actual es ADMIN, además permite
- * gestionar el equipo: renombrar, cambiar rol y desactivar usuarios
- * (CREACION/MODIFICACION/DESACTIVACION_USUARIO en la auditoría).
+ * MODO LOCAL: overlay para elegir qué garzón opera este dispositivo
+ * (INICIO/CIERRE_SESION quedan en la auditoría).
+ * MODO COMPARTIDO: la identidad sale de la cuenta autenticada, así que
+ * la lista no selecciona; queda como panel de equipo.
+ * En ambos, un ADMIN gestiona usuarios: renombrar, cambiar rol y
+ * desactivar (CREACION/MODIFICACION/DESACTIVACION_USUARIO auditadas).
  */
 export function SelectorGarzon({
   abierto,
@@ -35,7 +38,9 @@ export function SelectorGarzon({
   const [rolEdit, setRolEdit] = useState<RolGarzon>("GARZON");
   const [bajaId, setBajaId] = useState<string | null>(null);
 
-  const forzado = garzonId === null;
+  // En compartido nunca se fuerza: sin perfil aún no hay nada que elegir.
+  const forzado = garzonId === null && !MODO_COMPARTIDO;
+  const seleccionable = !MODO_COMPARTIDO;
   const esAdmin = garzonActual?.rol === "ADMIN";
   if (!abierto && !forzado) return null;
 
@@ -92,9 +97,13 @@ export function SelectorGarzon({
             <UserRound className="h-5 w-5" />
           </span>
           <div className="flex-1">
-            <h2 className="text-lg font-black tracking-tight">¿Quién atiende?</h2>
+            <h2 className="text-lg font-black tracking-tight">
+              {seleccionable ? "¿Quién atiende?" : "Equipo"}
+            </h2>
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
-              Cada acción queda registrada en la auditoría a nombre del garzón.
+              {seleccionable
+                ? "Cada acción queda registrada en la auditoría a nombre del garzón."
+                : "Tu identidad viene de tu cuenta: cada acción queda auditada a tu nombre."}
             </p>
           </div>
           {!forzado && (
@@ -152,16 +161,30 @@ export function SelectorGarzon({
               <li key={g.id} className="flex items-center gap-1.5">
                 <button
                   onClick={() => {
+                    if (!seleccionable) return;
                     acciones.seleccionarGarzon(g.id);
                     onCerrar();
                   }}
-                  className={`flex min-h-12 flex-1 items-center gap-2 rounded-xl border px-3 text-left text-sm font-semibold transition active:scale-[0.98] ${
+                  disabled={!seleccionable}
+                  className={`flex min-h-12 flex-1 items-center gap-2 rounded-xl border px-3 text-left text-sm font-semibold transition ${
+                    seleccionable ? "active:scale-[0.98]" : "cursor-default"
+                  } ${
                     g.id === garzonId
                       ? "border-verde-600 bg-verde-50 text-verde-800 dark:border-verde-500/40 dark:bg-verde-500/10 dark:text-verde-300"
-                      : "border-zinc-200 hover:bg-zinc-50 dark:border-white/10 dark:hover:bg-white/5"
+                      : "border-zinc-200 dark:border-white/10" +
+                        (seleccionable
+                          ? " hover:bg-zinc-50 dark:hover:bg-white/5"
+                          : "")
                   }`}
                 >
-                  <span className="min-w-0 flex-1 truncate">{g.nombre}</span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {g.nombre}
+                    {g.email && (
+                      <span className="ml-1.5 text-xs font-normal text-zinc-400 dark:text-zinc-500">
+                        {g.email}
+                      </span>
+                    )}
+                  </span>
                   {g.rol === "ADMIN" && (
                     <ShieldCheck className="h-4 w-4 shrink-0 text-azul-600 dark:text-azul-400" />
                   )}
@@ -198,25 +221,27 @@ export function SelectorGarzon({
           )}
         </ul>
 
-        <div className="mt-4 flex gap-2 border-t border-zinc-200 pt-4 dark:border-white/10">
-          <input
-            value={nombre}
-            onChange={(e) => setNombre(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void crear();
-            }}
-            placeholder="Nuevo garzón…"
-            aria-label="Nombre del nuevo garzón"
-            className="min-h-12 flex-1 rounded-xl border border-zinc-300 bg-white px-3 text-sm outline-none focus:border-verde-600 dark:border-white/15 dark:bg-white/5"
-          />
-          <button
-            onClick={() => void crear()}
-            disabled={nombre.trim().length < 2 || ocupado}
-            className="btn btn-verde disabled:opacity-40"
-          >
-            <UserRoundPlus className="h-4 w-4" /> Agregar
-          </button>
-        </div>
+        {(seleccionable || esAdmin) && (
+          <div className="mt-4 flex gap-2 border-t border-zinc-200 pt-4 dark:border-white/10">
+            <input
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void crear();
+              }}
+              placeholder="Nuevo garzón…"
+              aria-label="Nombre del nuevo garzón"
+              className="min-h-12 flex-1 rounded-xl border border-zinc-300 bg-white px-3 text-sm outline-none focus:border-verde-600 dark:border-white/15 dark:bg-white/5"
+            />
+            <button
+              onClick={() => void crear()}
+              disabled={nombre.trim().length < 2 || ocupado}
+              className="btn btn-verde disabled:opacity-40"
+            >
+              <UserRoundPlus className="h-4 w-4" /> Agregar
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

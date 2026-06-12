@@ -122,7 +122,39 @@ nuevo** (jsonb) y fecha exacta:
 - En **modo local** la auditoría se replica en localStorage (append-only,
   tope de 2.000 registros).
 
-## 3c. Precuenta PDF
+## 3c. Autenticación por mesero (Supabase Auth)
+
+En modo compartido **cada mesero trabaja con su propia sesión**:
+
+- **Registro** con nombre completo, correo y contraseña (teléfono
+  opcional). Un trigger crea el perfil en `garzones` con **rol GARZON**
+  por defecto y lo audita (`REGISTRO_USUARIO`). Si existe un perfil sin
+  cuenta con el mismo nombre (equipo seed), el registro **lo reclama**
+  conservando rol e historial.
+- **Login / logout** con correo y contraseña, sesión **persistida** en el
+  dispositivo y renovada sola; `INICIO_SESION` y `CIERRE_SESION` quedan
+  en la auditoría. **Recuperación de contraseña** por correo incluida.
+- **Sesiones separadas de verdad**: la identidad de TODA escritura sale
+  de `auth.uid()` **dentro de las funciones SQL** — el cliente ya no
+  puede actuar a nombre de otro; cada atención, consumo y abono queda
+  asociado al usuario autenticado.
+- **Protección de rutas**: sin sesión solo se ve el acceso. Un usuario
+  **desactivado** no puede operar ni leer datos (RLS lo deja fuera) y ve
+  una pantalla de cuenta desactivada.
+- **RLS**: las tablas solo se leen con sesión de un usuario **activo**
+  (`es_usuario_activo()`); `anon` no lee nada. Solo **ADMIN** puede
+  crear/modificar/desactivar usuarios (validado en el servidor).
+- El **garzón** ve sus mesas con el filtro *“Mis mesas”*; el **ADMIN**
+  ve el panel general y toda la auditoría.
+
+> **Bootstrap del primer ADMIN** (una vez): regístrate en la app y luego
+> ejecuta en el SQL Editor
+> `update garzones set rol='ADMIN' where email='tu@correo.cl';`
+> — o regístrate con el nombre exacto `Administración` para reclamar el
+> perfil ADMIN seed. En **modo local** (sin Supabase) no hay cuentas: se
+> elige el garzón en el dispositivo, como hasta ahora.
+
+## 3d. Precuenta PDF
 
 Desde cualquier mesa activa, **Generar precuenta** produce un PDF
 profesional formato ticket 80 mm con la identidad Porto Alegre
@@ -146,6 +178,9 @@ porto-alegre/
                                 abonos, garzones, RLS, RPCs, seed, Realtime
     0003_auditoria.sql        → auditoría inalterable + roles + RPCs con
                                 registro automático + transferencia
+    0004_autenticacion.sql    → Supabase Auth: perfiles enlazados,
+                                identidad desde auth.uid(), RLS solo
+                                para usuarios activos
   public/
     manifest.webmanifest      → identidad de la app instalable
     sw.js                     → service worker (offline tras primera carga)
@@ -166,7 +201,8 @@ porto-alegre/
                                 SelectorMenu, SelectorGarzon (+ gestión de
                                 usuarios ADMIN), SeccionAbonos,
                                 ItemAtencion, Aviso, Conexion, BotonTema
-    pantallas/                → PantallaMesas, PantallaMesa,
+    pantallas/                → PantallaAcceso (login/registro/recuperar),
+                                PantallaMesas, PantallaMesa,
                                 PantallaDesglose, PantallaHistorial,
                                 PantallaAuditoria
 ```
@@ -181,7 +217,7 @@ porto-alegre/
 | `atenciones` | Una por ocupación: `numero` correlativo (#145), `mesa_id`, `garzon_id`, estado, fechas de apertura/cierre y totales congelados (`total_menu`, `total_consumos`, `total_abonos`, `saldo_final`) |
 | `consumos` | Una fila por producto y atención: `cantidad`, `precio_unitario`, `subtotal` calculado |
 | `abonos` | Pagos parciales: `monto`, `observacion`, `garzon_id`, fecha |
-| `garzones` | Quién atiende, con `rol` ADMIN/GARZON (seed de 10 + Administración) |
+| `garzones` | Perfiles del negocio: nombre, `rol` ADMIN/GARZON, `email`, `telefono`, `activo` y enlace a la cuenta (`auth_user_id`) |
 | `auditoria` | Registro inalterable de toda acción (solo INSERT desde las funciones; solo SELECT para la app) |
 
 El catálogo de productos es un módulo estático del cliente (precios
@@ -192,23 +228,29 @@ en localStorage bajo `porto-alegre-mesas`.
 
 1. Crea un proyecto gratis en [supabase.com](https://supabase.com).
 2. **SQL Editor → New query** → pega y ejecuta (**Run**), en orden:
-   primero [`supabase/migrations/0002_atenciones.sql`](supabase/migrations/0002_atenciones.sql)
-   y luego [`supabase/migrations/0003_auditoria.sql`](supabase/migrations/0003_auditoria.sql).
+   [`0002_atenciones.sql`](supabase/migrations/0002_atenciones.sql),
+   [`0003_auditoria.sql`](supabase/migrations/0003_auditoria.sql) y
+   [`0004_autenticacion.sql`](supabase/migrations/0004_autenticacion.sql).
    Sirven igual para un proyecto nuevo o para actualizar el esquema
    viejo, y son idempotentes: re-ejecutarlos no borra historial ni
    auditoría.
-3. **Project Settings → API keys** → copia la clave *Publishable*
+3. **Authentication → URL Configuration** → en *Site URL* pon la URL de
+   la app (la de Vercel), para que el enlace de recuperar contraseña
+   vuelva a la app. (Opcional: en *Sign In / Up* puedes desactivar
+   *Confirm email* para que el equipo entre sin paso de confirmación.)
+4. **Project Settings → API keys** → copia la clave *Publishable*
    (`sb_publishable_…`) y, en **Project Settings → General**, la *Project
    URL* (`https://….supabase.co`).
-4. Configura las variables (build):
+5. Configura las variables (build):
    - Local: copia `.env.example` a `.env` y complétalas.
    - Vercel: agrégalas como *Environment Variables* del proyecto
      (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) y vuelve a desplegar.
 
 > La clave publishable/anon es pública por diseño (viaja en el navegador);
-> la protección real son las políticas RLS + funciones del esquema. Los
-> garzones se eligen por nombre en cada dispositivo (sin contraseña, como
-> un POS de barra): cada atención y abono queda registrado a su nombre.
+> la protección real son **Supabase Auth + RLS + funciones**: sin sesión
+> de un usuario activo no se lee ni se escribe nada, y la identidad de
+> cada acción sale del token (no del cliente). Solo en modo local (sin
+> Supabase) el garzón se elige por nombre en el dispositivo, estilo POS.
 
 ## 6. Pantallas y diseño
 
