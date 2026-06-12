@@ -1,113 +1,135 @@
 # Porto Alegre — Consumo de mesas
 
-> **App móvil (PWA) para garzones**: registro de consumo de bebestibles por
-> mesa, con menú buffet, totales automáticos y persistencia local en el
-> dispositivo.
+> **App móvil (PWA) para garzones de un restobar brasileño**: registro de
+> consumo de bebestibles por mesa con **sincronización en tiempo real entre
+> 3 y 15 garzones** (Supabase Realtime), menú buffet, totales automáticos,
+> modo claro/oscuro e identidad visual Brasil (verde, amarillo y azul marino).
 
 Vive en `/porto-alegre`, **apartada de MESALISTA** (la app de reservas en la
-raíz del repositorio), y se instala en cualquier celular como una app normal.
+raíz del repositorio), y se instala en cualquier celular o tablet como una
+app normal.
 
 ## 1. Arquitectura
 
-**SPA estática (Vite + React 18 + TypeScript + Tailwind) instalable como
-PWA, sin backend.** La especificación exige persistir toda la información
-**localmente**: el estado completo (mesas y consumos) vive en `localStorage`
-del dispositivo del garzón, detrás de un módulo de almacenamiento versionado.
-El servidor (Railway) solo entrega archivos estáticos; tras la primera carga,
-el service worker deja la app operativa incluso sin conexión.
+**SPA (Vite + React 18 + TypeScript + Tailwind) instalable como PWA**, con
+dos modos de operación detrás del mismo estado global:
 
 ```
 UI (pantallas + componentes)
-        │ dispatch(acción)
-Estado global: Context + useReducer   ←  única fuente de verdad en memoria
-        │ efecto de persistencia
-db/almacen.ts (localStorage, esquema versionado)   ←  "base de datos"
-        +
-data/catalogo.ts · data/menus.ts (catálogo y menús: seeder de solo lectura)
+        │ acciones (API del contexto)
+Estado global: Context + useReducer ── optimistic updates
+        │                                    │
+        │ persistencia/caché                 │ confirmación
+db/almacen.ts (localStorage)        sync/supabase.ts
+                                      ├─ RPCs transaccionales (escrituras)
+                                      ├─ Realtime (cambios de todos los garzones)
+                                      └─ revalidación de estado al reconectar
 ```
 
-## 2. Estructura de carpetas
+- **Modo compartido** (con `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`):
+  la fuente de verdad es Postgres en Supabase. Cada mutación se aplica al
+  instante en pantalla (optimistic update) y se confirma con una función
+  RPC transaccional; los cambios de los demás garzones llegan por el canal
+  Realtime y pisan el estado local con los valores autoritativos.
+- **Modo local** (sin esas variables): un solo dispositivo con localStorage,
+  útil para desarrollo y demos. La interfaz indica el modo en todo momento
+  (pill *Sincronizado / Sin conexión / Modo local*).
+
+## 2. Concurrencia y consistencia (3–15 garzones)
+
+Las tablas **solo aceptan lecturas** desde la app (RLS sin políticas de
+escritura); **toda escritura pasa por funciones SQL transaccionales**
+(`security definer`) definidas en
+[`supabase/migrations/0001_esquema.sql`](supabase/migrations/0001_esquema.sql):
+
+| Requisito | Mecanismo |
+|---|---|
+| Sin registros duplicados | `UNIQUE (mesa_id, producto_id)` + upsert: una línea por producto por mesa |
+| Sin pérdida de información (Caso 1) | `agregar_consumo` hace **incremento atómico** (`cantidad = cantidad + delta`): las operaciones simultáneas conmutan y nunca se pisan |
+| Sin sobrescrituras accidentales | Cada RPC bloquea la fila de la mesa (`SELECT … FOR UPDATE`) y valida su estado dentro de la transacción |
+| Bloqueo lógico al cerrar (Caso 2) | `cerrar_mesa` es un **compare-and-set**: `UPDATE … WHERE estado='PENDIENTE'`; el segundo garzón recibe `MESA_YA_CERRADA` y la app muestra *"La mesa ya fue cerrada por otro garzón"* |
+| Consistencia transaccional | `nueva_cuenta` borra consumos y resetea la mesa en una sola transacción; agregar a una mesa que otro garzón está cerrando espera el lock y es rechazado con `MESA_PAGADA` |
+| Optimistic updates + revalidación | La UI aplica el cambio al instante; si la RPC es rechazada se muestra el aviso y se **revalida** esa mesa contra la base; además se recarga todo el estado en cada (re)conexión del canal |
+| Sincronización instantánea | Realtime publica `mesas` y `consumos`; cada evento se aplica como estado autoritativo en todos los dispositivos |
+
+Verificado contra Postgres real: 30 incrementos en paralelo + 1 producto
+concurrente terminan exactamente en `heineken: 30` y `mojito: 1` (2 filas), y
+en 20 rondas de doble cierre simultáneo siempre ganó exactamente uno.
+
+> Si se corta la conexión en modo compartido, la app pasa a **solo lectura**
+> (pill roja *Sin conexión*) para impedir divergencias, y al volver la señal
+> el canal se reconecta y revalida todo el estado.
+
+## 3. Estructura de carpetas
 
 ```
 porto-alegre/
-  index.html                  → shell + manifest + meta PWA
+  index.html                  → shell + manifest + tema sin parpadeo
   railway.json                → build/arranque para Railway
+  supabase/migrations/
+    0001_esquema.sql          → tablas, RLS, RPCs transaccionales, seed, Realtime
   public/
     manifest.webmanifest      → identidad de la app instalable
     sw.js                     → service worker (offline tras primera carga)
-    icons/                    → íconos 192/512 + maskable
+    icons/                    → íconos 192/512 + maskable (verde Brasil)
   src/
-    main.tsx                  → arranque + registro del service worker
-    App.tsx                   → navegación entre pantallas (por estado)
+    main.tsx · App.tsx        → arranque, navegación, aviso global
     tipos.ts                  → Mesa, Producto, ConsumoMesa, MenuMesa
-    data/
-      catalogo.ts             → seeder: catálogo completo de la carta
-      menus.ts                → menús buffet (mismos valores que MESALISTA)
-    db/
-      almacen.ts              → localStorage: cargar/guardar + seed de 100 mesas
-    estado/
-      contexto.tsx            → reducer con todas las operaciones de negocio
-    util/
-      dinero.ts               → formato CLP ($7.600)
-      busqueda.ts             → normalización (mayúsculas/acentos) y match parcial
-      fechas.ts               → formato fecha/hora es-CL
-    componentes/
-      TarjetaMesa.tsx         → celda de la grilla (número, estado, total)
-      Buscador.tsx            → barra de búsqueda en tiempo real
-      LineaConsumo.tsx        → línea de cuenta con stepper y eliminar
-      SelectorMenu.tsx        → menú buffet + contadores de personas
-    pantallas/
-      PantallaMesas.tsx       → principal: las 100 mesas
-      PantallaMesa.tsx        → detalle: estado, menú, cuenta, agregar
-      PantallaDesglose.tsx    → desglose completo de la mesa seleccionada
+    data/catalogo.ts          → seeder: carta completa (124 productos)
+    data/menus.ts             → menús buffet (mismos valores que MESALISTA)
+    db/almacen.ts             → localStorage (modo local + caché offline)
+    sync/supabase.ts          → cliente, mapeos, RPCs y traducción de errores
+    estado/contexto.tsx       → reducer + optimistic updates + Realtime
+    util/                     → dinero (CLP), búsqueda, fechas, tema
+    componentes/              → TarjetaMesa, Buscador, LineaConsumo,
+                                SelectorMenu, Aviso, Conexion, BotonTema
+    pantallas/                → PantallaMesas, PantallaMesa, PantallaDesglose
 ```
 
-## 3. Base de datos
+## 4. Base de datos
 
-`localStorage` bajo la clave `porto-alegre-mesas`, con esquema versionado:
+**Supabase (Postgres)** — tablas `mesas` (100 filas seed, estado
+PENDIENTE/PAGADA, fechas, menú buffet) y `consumos` (una fila por producto y
+mesa con `cantidad`, `precio_unitario` y `subtotal` calculado). El catálogo
+de productos es un módulo estático del cliente (precios capturados al
+agregar). En modo local, el mismo estado se guarda versionado en
+localStorage bajo `porto-alegre-mesas`.
 
-```jsonc
-{
-  "version": 1,
-  "mesas": [ // exactamente 100, seed automático al primer uso
-    {
-      "id": "mesa-7", "numeroMesa": 7, "estado": "PENDIENTE", // o "PAGADA"
-      "total": 87650, "fechaApertura": "2026-06-11T23:40:00.000Z",
-      "fechaCierre": null,
-      "menu": { "menuId": "BUFFET_APERITIVO_VINO", "adultos": 2, "ninos6a11": 1, "ninos3a5": 1 }
-    }
-  ],
-  "consumos": [
-    { "id": "c-mesa-7-heineken", "mesaId": "mesa-7", "productoId": "heineken",
-      "cantidad": 2, "precioUnitario": 3800, "subtotal": 7600 }
-  ]
-}
-```
+### Configurar Supabase (una sola vez)
 
-- `total` se recalcula en cada mutación: **menú + consumos**.
-- Si la versión del esquema no calza o los datos están corruptos, se
-  re-inicializa con el seed (100 mesas pendientes en $0).
-- El **catálogo de productos** es un módulo estático (`data/catalogo.ts`)
-  con ids estables derivados del nombre: es el seeder pedido y la fuente de
-  verdad de precios.
+1. Crea un proyecto gratis en [supabase.com](https://supabase.com).
+2. **SQL Editor → New query** → pega completo
+   [`supabase/migrations/0001_esquema.sql`](supabase/migrations/0001_esquema.sql)
+   y ejecuta (**Run**). Crea tablas, seguridad, funciones, seed y Realtime.
+3. **Project Settings → API** → copia *Project URL* y la clave *anon public*.
+4. Configura las variables (build):
+   - Local: copia `.env.example` a `.env` y complétalas.
+   - Railway/Vercel/Render: agrégalas como variables del servicio
+     (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) y vuelve a desplegar.
 
-## 4. Pantallas
+> La clave `anon` es pública por diseño (viaja en el navegador); la
+> protección real son las políticas RLS + funciones del esquema. No hay
+> login de garzones porque no fue solicitado: cualquiera con la URL puede
+> operar, igual que un POS de barra.
+
+## 5. Pantallas y diseño
+
+Identidad **restobar brasileño premium**: paleta Verde Brasil `#009739`
+(principal), Amarillo Brasil desaturado (secundario) y **azul marino
+elegante** de la bandera (apoyo y fondo del modo oscuro), sobre neutros
+blanco/gris. **Light y Dark Mode completos** (botón en el header, recuerda
+la preferencia y respeta la del sistema).
 
 | Pantalla | Qué hace |
 |---|---|
-| **Principal** | Las 100 mesas con número, estado y total. Amarillo = PENDIENTE, verde = PAGADA. |
-| **Mesa** | Total acumulado, marcar pagada (con confirmación), menú buffet por persona, cuenta con steppers de cantidad y eliminar, buscador con agregado de productos en un toque. PAGADA bloquea todo y muestra el candado de cierre, con opciones *Reabrir cuenta* y *Nueva cuenta*. |
-| **Desglose** | La cuenta completa de la mesa seleccionada: líneas del menú según personas/niños y menú elegido por los adultos, líneas `2 x Heineken = $7.600`, subtotales y TOTAL. |
+| **Mesas** | Las 100 mesas: amarillo suave = pendiente, verde = pagada, **azul = última mesa seleccionada**. Tarjetas redondeadas con sombra suave y total visible. |
+| **Mesa** | Flujo de garzón en segundos: el **buscador queda fijo en el header** y la carta a un toque de distancia; total gigante siempre visible; *Cobrar mesa* en dos toques. Mesa pagada queda bloqueada con candado, *Reabrir* y *Nueva cuenta*. |
+| **Desglose** | La cuenta completa: menú según personas/niños y menú elegido por los adultos, consumos `2 x Heineken = $7.600`, subtotales y TOTAL destacado. |
 
-## 5. Componentes reutilizables
-
-`TarjetaMesa` (memoizada), `Buscador`, `LineaConsumo` (memoizada),
-`SelectorMenu` (con su `Contador` de personas interno).
+Botones de mínimo 48 px, tipografía contundente y layout de dos columnas en
+tablets (carta junto a la cuenta), estilo POS moderno.
 
 ## 6. Menú buffet (igual que la app de reservas)
-
-Mismos valores y desglose que MESALISTA: el menú elegido aplica por adulto y
-los niños pagan tarifa fija por tramo.
 
 | Concepto | Precio |
 |---|---|
@@ -125,9 +147,10 @@ Requisitos: Node 20+ y pnpm 9+.
 ```bash
 cd porto-alegre
 pnpm install
-pnpm dev        # desarrollo → http://localhost:5173
-pnpm build      # typecheck + bundle de producción en dist/
-pnpm start      # sirve dist/ (igual que en Railway)
+cp .env.example .env   # opcional: credenciales de Supabase (modo compartido)
+pnpm dev               # desarrollo → http://localhost:5173
+pnpm build             # typecheck + bundle de producción en dist/
+pnpm start             # sirve dist/ (igual que en Railway)
 ```
 
 ## 8. Instalar en el celular (PWA)
@@ -137,42 +160,34 @@ Con la app desplegada (HTTPS), abre la URL en el teléfono:
 - **Android (Chrome)**: menú ⋮ → *Agregar a la pantalla principal* → *Instalar*.
 - **iPhone (Safari)**: *Compartir* → *Agregar a pantalla de inicio*.
 
-Queda con ícono y ventana propios y funciona sin conexión después de la
-primera carga (los datos son locales al dispositivo).
-
 ## 9. Desplegar en Railway (proyecto `observant-emotion`)
 
-El repo ya incluye `porto-alegre/railway.json`. En [railway.com](https://railway.com):
+1. En [railway.com](https://railway.com), proyecto **observant-emotion** →
+   **+ Create → GitHub Repo** → `Mukriscell/reservas-restaurante` (rama `main`).
+2. En el servicio: **Settings → Source → Root Directory** = `porto-alegre`.
+3. **Variables** → agrega `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY`
+   (sin ellas queda en modo local, sin sincronización entre garzones).
+4. **Settings → Networking → Generate Domain** → URL para los celulares.
 
-1. Abre el proyecto **observant-emotion** → **+ Create → GitHub Repo** →
-   `Mukriscell/reservas-restaurante` (rama `main`).
-2. En el servicio nuevo: **Settings → Source → Root Directory** = `porto-alegre`.
-3. **Settings → Networking → Generate Domain** → obtienes
-   `https://….up.railway.app` para abrir e instalar en los celulares.
-
-Cada `git push` a `main` re-despliega automáticamente. (Alternativa gratis:
-el mismo root directory funciona en Vercel o Render.)
+Cada `git push` a `main` re-despliega automáticamente.
 
 ## 10. Decisiones técnicas
 
-- **PWA en vez de binario nativo**: el requisito de desplegarla en Railway y
-  "descargarla" en cualquier celular se cumple con una PWA instalable; evita
-  tiendas de apps y mantiene un solo código.
-- **Sin backend ni librerías de estado/rutas**: la spec exige persistencia
-  local; `Context + useReducer + localStorage` cubren 100 mesas y una carta
-  de 124 productos sin dependencias extra. Navegación por estado (3 vistas).
-- **Rendimiento**: tarjetas y líneas de cuenta memoizadas, contexto de
-  `dispatch` separado del de datos (las pantallas que solo despachan no se
-  re-renderizan), filtrado de búsqueda con `useMemo`, bundle ~55 kB gzip.
-- **Una línea por producto**: agregar un producto ya presente suma cantidad
-  (id de consumo determinista `c-<mesa>-<producto>`), igual que opera un
-  garzón.
-- **Mesas pagadas**: el reducer bloquea cualquier mutación sobre una mesa
-  PAGADA (defensa en profundidad, además de ocultar los controles). *Reabrir*
-  corrige un pago marcado por error; *Nueva cuenta* (con confirmación) deja
-  la mesa lista para los siguientes clientes — es el complemento mínimo del
-  ciclo apertura/cierre que definen `fechaApertura`/`fechaCierre`.
-- **Búsqueda**: normaliza mayúsculas y acentos ("jager" encuentra *Mojito
-  Jäger*) con coincidencia parcial, como exige el spec.
-- **`serve` como único agregado de producción** para servir `dist/` en
-  Railway; el resto del runtime es solo React.
+- **Escrituras solo por RPC**: ninguna app cliente puede hacer `UPDATE`
+  directo; los invariantes (estados, cantidades, unicidad) viven en la base
+  y son imposibles de saltar desde un dispositivo.
+- **Incrementos por delta en vez de "set cantidad"**: las operaciones de
+  varios garzones conmutan; no existe el *lost update* clásico.
+- **Cierre por compare-and-set, sin optimismo**: cobrar es la operación de
+  bloqueo lógico, así que espera la confirmación del servidor (~1 viaje) y
+  pierde con un mensaje claro si otro garzón ganó.
+- **IDs deterministas** (`c-<mesa>-<producto>`): el optimistic update y la
+  fila del servidor coinciden y la reconciliación es trivial.
+- **Sin conexión ⇒ solo lectura** en modo compartido: preferimos bloquear
+  un momento antes que inventar una cola offline que pueda divergir.
+- **Sin dependencias extra**: estado con Context + useReducer, navegación
+  por estado, avisos propios; `@supabase/supabase-js` es la única adición
+  (exigida por el requisito) y `serve` para servir estáticos.
+- **Paleta con escalas completas** (`verde`, `amarillo`, `azul` en Tailwind)
+  y clases componibles (`tarjeta`, `btn`, `pill`) para mantener consistencia
+  visual en ambos temas sin duplicar estilos.

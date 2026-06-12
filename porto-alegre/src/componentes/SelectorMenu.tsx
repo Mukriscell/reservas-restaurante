@@ -24,15 +24,15 @@ function Contador({
   return (
     <div className="flex items-center justify-between gap-2">
       <div className="min-w-0">
-        <p className="text-sm text-stone-200">{etiqueta}</p>
-        <p className="text-xs text-stone-500">{detalle}</p>
+        <p className="text-sm font-medium">{etiqueta}</p>
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">{detalle}</p>
       </div>
-      <div className="flex items-center rounded-lg border border-stone-700">
+      <div className="flex items-center rounded-xl border border-zinc-300 dark:border-white/15">
         <button
           onClick={() => onCambiar(Math.max(valor - 1, 0))}
           disabled={valor === 0}
           aria-label={`Quitar ${etiqueta}`}
-          className="px-2 py-1.5 text-stone-300 disabled:opacity-30"
+          className="px-2.5 py-2.5 text-zinc-600 disabled:opacity-30 dark:text-zinc-300"
         >
           <Minus className="h-4 w-4" />
         </button>
@@ -40,7 +40,7 @@ function Contador({
         <button
           onClick={() => onCambiar(Math.min(valor + 1, 99))}
           aria-label={`Agregar ${etiqueta}`}
-          className="px-2 py-1.5 text-stone-300"
+          className="px-2.5 py-2.5 text-zinc-600 dark:text-zinc-300"
         >
           <Plus className="h-4 w-4" />
         </button>
@@ -50,7 +50,7 @@ function Contador({
 }
 
 /**
- * Menú buffet de la mesa: selección del menú por adulto y cantidades de
+ * Menú buffet de la mesa: menú elegido por los adultos y cantidades de
  * personas, con el mismo desglose de precios que la app de reservas.
  */
 export function SelectorMenu({
@@ -64,20 +64,22 @@ export function SelectorMenu({
 }) {
   if (bloqueada) {
     return (
-      <section className="rounded-2xl border border-stone-800 bg-stone-900/60 p-4">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-amber-400">
+      <section className="tarjeta p-4">
+        <h2 className="flex items-center gap-2 text-sm font-bold text-verde-700 dark:text-verde-400">
           <UtensilsCrossed className="h-4 w-4" /> Menú buffet
         </h2>
         {menu ? (
-          <p className="mt-2 text-sm text-stone-300">
+          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
             {getMenuBuffet(menu.menuId).nombre} — {menu.adultos} adultos,{" "}
             {menu.ninos6a11} niños (6-11), {menu.ninos3a5} niños (3-5) ·{" "}
-            <span className="font-semibold text-amber-400">
+            <span className="font-bold text-verde-700 dark:text-amarillo-400">
               {formatCLP(totalMenu(menu))}
             </span>
           </p>
         ) : (
-          <p className="mt-2 text-sm text-stone-500">Sin menú asignado.</p>
+          <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+            Sin menú asignado.
+          </p>
         )}
       </section>
     );
@@ -89,14 +91,14 @@ export function SelectorMenu({
   };
 
   return (
-    <section className="rounded-2xl border border-stone-800 bg-stone-900/60 p-4">
-      <h2 className="flex items-center gap-2 text-sm font-semibold text-amber-400">
+    <section className="tarjeta p-4">
+      <h2 className="flex items-center gap-2 text-sm font-bold text-verde-700 dark:text-verde-400">
         <UtensilsCrossed className="h-4 w-4" /> Menú buffet (por persona)
       </h2>
 
       <select
         aria-label="Menú elegido por los adultos"
-        className="mt-3 w-full rounded-xl border border-stone-700 bg-stone-900 px-3 py-2.5 text-sm text-stone-100 focus:border-amber-500 focus:outline-none"
+        className="input mt-3"
         value={menu?.menuId ?? ""}
         onChange={(e) => {
           const id = e.target.value as MenuId | "";
@@ -140,9 +142,9 @@ export function SelectorMenu({
             valor={menu.ninos3a5}
             onCambiar={(v) => fijar({ ninos3a5: v })}
           />
-          <p className="flex justify-between border-t border-stone-800 pt-3 text-sm">
-            <span className="text-stone-400">Subtotal menú</span>
-            <span className="font-semibold text-amber-400">
+          <p className="flex justify-between border-t border-zinc-200 pt-3 text-sm dark:border-white/10">
+            <span className="text-zinc-500 dark:text-zinc-400">Subtotal menú</span>
+            <span className="font-bold text-verde-700 dark:text-amarillo-400">
               {formatCLP(totalMenu(menu))}
             </span>
           </p>

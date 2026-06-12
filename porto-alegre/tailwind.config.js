@@ -1,8 +1,57 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: "class",
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        // Verde Brasil (principal) — 600 es el verde bandera.
+        verde: {
+          50: "#ecfdf3",
+          100: "#d1fadf",
+          200: "#a6f4c5",
+          300: "#6ce9a6",
+          400: "#32d583",
+          500: "#12b76a",
+          600: "#009739",
+          700: "#027a48",
+          800: "#05603a",
+          900: "#054f31",
+          950: "#022c1c",
+        },
+        // Amarillo Brasil (secundario), desaturado para uso profesional.
+        amarillo: {
+          50: "#fefbe8",
+          100: "#fef7c3",
+          200: "#feee95",
+          300: "#fde272",
+          400: "#fac515",
+          500: "#eaaa08",
+          600: "#ca8504",
+          700: "#a15c07",
+          800: "#854a0e",
+          900: "#713b12",
+          950: "#432008",
+        },
+        // Azul oscuro elegante (apoyo) — familia del azul bandera #002776.
+        azul: {
+          50: "#eef4ff",
+          100: "#e0eaff",
+          200: "#c7d7fe",
+          300: "#a4bcfd",
+          400: "#8098f9",
+          500: "#6172f3",
+          600: "#444ce7",
+          700: "#3538cd",
+          800: "#2d31a6",
+          900: "#1e2470",
+          950: "#101840",
+        },
+      },
+      boxShadow: {
+        suave: "0 1px 3px rgb(16 24 64 / 0.06), 0 4px 16px rgb(16 24 64 / 0.07)",
+      },
+    },
   },
   plugins: [],
 };

@@ -3,6 +3,7 @@ import { ProveedorApp } from "./estado/contexto";
 import { PantallaMesas } from "./pantallas/PantallaMesas";
 import { PantallaMesa } from "./pantallas/PantallaMesa";
 import { PantallaDesglose } from "./pantallas/PantallaDesglose";
+import { Aviso } from "./componentes/Aviso";
 
 type Vista =
   | { tipo: "mesas" }
@@ -11,12 +12,18 @@ type Vista =
 
 function Navegacion() {
   const [vista, setVista] = useState<Vista>({ tipo: "mesas" });
+  // Última mesa abierta: se destaca en azul en la grilla.
+  const [seleccionadaId, setSeleccionadaId] = useState<string | null>(null);
 
   switch (vista.tipo) {
     case "mesas":
       return (
         <PantallaMesas
-          onAbrirMesa={(mesaId) => setVista({ tipo: "mesa", mesaId })}
+          seleccionadaId={seleccionadaId}
+          onAbrirMesa={(mesaId) => {
+            setSeleccionadaId(mesaId);
+            setVista({ tipo: "mesa", mesaId });
+          }}
         />
       );
     case "mesa":
@@ -43,6 +50,7 @@ export default function App() {
   return (
     <ProveedorApp>
       <Navegacion />
+      <Aviso />
     </ProveedorApp>
   );
 }

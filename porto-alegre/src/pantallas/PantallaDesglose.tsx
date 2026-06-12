@@ -6,8 +6,8 @@ import { formatCLP } from "../util/dinero";
 import { formatFechaHora } from "../util/fechas";
 
 /**
- * Interfaz adicional de desglose: la cuenta completa de la mesa con el
- * menú (personas, niños y menú elegido por los adultos) más los consumos.
+ * Desglose completo de la mesa seleccionada: menú según personas/niños y
+ * menú elegido por los adultos, más los consumos y el TOTAL.
  */
 export function PantallaDesglose({
   mesaId,
@@ -23,105 +23,98 @@ export function PantallaDesglose({
   const personas = mesa.menu
     ? mesa.menu.adultos + mesa.menu.ninos6a11 + mesa.menu.ninos3a5
     : 0;
+  const pagada = mesa.estado === "PAGADA";
 
   return (
     <div className="mx-auto max-w-xl px-3 pb-10">
-      <header className="sticky top-0 z-10 -mx-3 mb-4 border-b border-stone-800 bg-stone-950/95 px-3 py-3 backdrop-blur">
-        <div className="flex items-center gap-3">
+      <header className="sticky top-0 z-20 -mx-3 mb-4 border-b border-zinc-200/80 bg-zinc-100/95 px-3 py-3 backdrop-blur dark:border-white/10 dark:bg-azul-950/95">
+        <div className="flex items-center gap-2.5">
           <button
             onClick={onVolver}
             aria-label="Volver a la mesa"
-            className="rounded-lg border border-stone-700 p-2 text-stone-300 hover:bg-stone-800"
+            className="btn btn-borde h-12 w-12 !px-0"
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="h-5 w-5" />
           </button>
-          <h1 className="flex flex-1 items-center gap-2 text-lg font-bold">
-            <Receipt className="h-5 w-5 text-amber-400" />
+          <h1 className="flex flex-1 items-center gap-2 text-lg font-black tracking-tight">
+            <Receipt className="h-5 w-5 text-verde-700 dark:text-amarillo-400" />
             Desglose · Mesa {mesa.numeroMesa}
           </h1>
-          <span
-            className={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide ${
-              mesa.estado === "PAGADA"
-                ? "bg-emerald-500/20 text-emerald-300"
-                : "bg-yellow-500/20 text-yellow-300"
-            }`}
-          >
+          <span className={`pill ${pagada ? "pill-pagada" : "pill-pendiente"}`}>
             {mesa.estado}
           </span>
         </div>
       </header>
 
-      <div className="rounded-2xl border border-stone-800 bg-stone-900/60 p-5">
+      <div className="tarjeta p-5">
         {mesa.fechaApertura && (
-          <p className="text-xs text-stone-500">
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
             Abierta: {formatFechaHora(mesa.fechaApertura)}
-            {mesa.fechaCierre &&
-              ` · Pagada: ${formatFechaHora(mesa.fechaCierre)}`}
+            {mesa.fechaCierre && ` · Pagada: ${formatFechaHora(mesa.fechaCierre)}`}
           </p>
         )}
 
         {/* Menú buffet */}
         {mesa.menu && (
           <section className="mt-4">
-            <h2 className="text-xs font-bold uppercase tracking-wide text-stone-500">
+            <h2 className="text-[11px] font-black uppercase tracking-[0.15em] text-zinc-400 dark:text-zinc-500">
               Menú · {getMenuBuffet(mesa.menu.menuId).nombre} · {personas}{" "}
               {personas === 1 ? "persona" : "personas"}
             </h2>
             <ul className="mt-2 space-y-1.5">
               {lineasMenu.map((l) => (
-                <li
-                  key={l.texto}
-                  className="flex justify-between gap-3 text-sm"
-                >
-                  <span className="text-stone-300">{l.texto}</span>
-                  <span className="font-medium">{formatCLP(l.monto)}</span>
+                <li key={l.texto} className="flex justify-between gap-3 text-sm">
+                  <span className="text-zinc-600 dark:text-zinc-300">{l.texto}</span>
+                  <span className="font-semibold">{formatCLP(l.monto)}</span>
                 </li>
               ))}
             </ul>
-            <p className="mt-2 flex justify-between border-t border-stone-800 pt-2 text-sm">
-              <span className="text-stone-400">Subtotal menú</span>
-              <span className="font-semibold">{formatCLP(subtotalMenu)}</span>
+            <p className="mt-2 flex justify-between border-t border-zinc-200 pt-2 text-sm dark:border-white/10">
+              <span className="text-zinc-500 dark:text-zinc-400">Subtotal menú</span>
+              <span className="font-bold">{formatCLP(subtotalMenu)}</span>
             </p>
           </section>
         )}
 
         {/* Consumos */}
         <section className="mt-4">
-          <h2 className="text-xs font-bold uppercase tracking-wide text-stone-500">
+          <h2 className="text-[11px] font-black uppercase tracking-[0.15em] text-zinc-400 dark:text-zinc-500">
             Consumos
           </h2>
           {consumos.length === 0 ? (
-            <p className="mt-2 text-sm text-stone-500">Sin consumos.</p>
+            <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+              Sin consumos.
+            </p>
           ) : (
             <>
               <ul className="mt-2 space-y-1.5">
                 {consumos.map((c) => (
                   <li key={c.id} className="flex justify-between gap-3 text-sm">
-                    <span className="text-stone-300">
+                    <span className="text-zinc-600 dark:text-zinc-300">
                       {c.cantidad} x {getProducto(c.productoId).nombre}{" "}
-                      <span className="text-stone-500">
+                      <span className="text-zinc-400 dark:text-zinc-500">
                         ({formatCLP(c.precioUnitario)} c/u)
                       </span>
                     </span>
-                    <span className="font-medium">{formatCLP(c.subtotal)}</span>
+                    <span className="font-semibold">{formatCLP(c.subtotal)}</span>
                   </li>
                 ))}
               </ul>
-              <p className="mt-2 flex justify-between border-t border-stone-800 pt-2 text-sm">
-                <span className="text-stone-400">Subtotal consumos</span>
-                <span className="font-semibold">
-                  {formatCLP(subtotalConsumos)}
+              <p className="mt-2 flex justify-between border-t border-zinc-200 pt-2 text-sm dark:border-white/10">
+                <span className="text-zinc-500 dark:text-zinc-400">
+                  Subtotal consumos
                 </span>
+                <span className="font-bold">{formatCLP(subtotalConsumos)}</span>
               </p>
             </>
           )}
         </section>
 
-        <p className="mt-5 flex items-baseline justify-between border-t-2 border-amber-600/40 pt-3">
-          <span className="text-sm font-bold uppercase tracking-wide text-stone-300">
+        <p className="mt-5 flex items-baseline justify-between rounded-xl bg-azul-950 px-4 py-3 text-white dark:bg-azul-900">
+          <span className="text-sm font-black uppercase tracking-[0.15em]">
             Total
           </span>
-          <span className="text-2xl font-bold text-amber-400">
+          <span className="text-2xl font-black text-amarillo-400">
             {formatCLP(mesa.total)}
           </span>
         </p>

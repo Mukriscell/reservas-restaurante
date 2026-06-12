@@ -1,6 +1,6 @@
 import { Search, X } from "lucide-react";
 
-/** Barra de búsqueda de productos con filtrado en tiempo real. */
+/** Barra de búsqueda de productos, siempre visible, con filtrado en vivo. */
 export function Buscador({
   valor,
   onCambiar,
@@ -10,13 +10,13 @@ export function Buscador({
 }) {
   return (
     <div className="relative">
-      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
+      <Search className="pointer-events-none absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-zinc-400 dark:text-zinc-500" />
       <input
         type="search"
         inputMode="search"
-        placeholder="Buscar producto… (ej: moji)"
+        placeholder="Buscar en la carta… (ej: moji)"
         aria-label="Buscar producto"
-        className="w-full rounded-xl border border-stone-700 bg-stone-900 py-2.5 pl-9 pr-9 text-sm text-stone-100 placeholder:text-stone-500 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+        className="input !pl-11 pr-10"
         value={valor}
         onChange={(e) => onCambiar(e.target.value)}
       />
@@ -24,7 +24,7 @@ export function Buscador({
         <button
           onClick={() => onCambiar("")}
           aria-label="Limpiar búsqueda"
-          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-stone-400 hover:text-stone-200"
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
         >
           <X className="h-4 w-4" />
         </button>

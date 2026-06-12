@@ -9,14 +9,35 @@
     <title>Porto Alegre — Consumo de mesas</title>
     <meta
       name="description"
-      content="Registro de consumo de bebestibles por mesa para garzones de Porto Alegre."
+      content="Restobar Porto Alegre: registro de consumo de bebestibles por mesa para garzones."
     />
-    <meta name="theme-color" content="#d97706" />
+    <meta
+      name="theme-color"
+      media="(prefers-color-scheme: light)"
+      content="#027a48"
+    />
+    <meta
+      name="theme-color"
+      media="(prefers-color-scheme: dark)"
+      content="#101840"
+    />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/png" href="/icons/icon-192.png" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Porto Alegre" />
+    <script>
+      // Aplica el tema antes del primer pintado para evitar parpadeos.
+      try {
+        var t = localStorage.getItem("porto-alegre-tema");
+        if (
+          t === "oscuro" ||
+          (!t && matchMedia("(prefers-color-scheme: dark)").matches)
+        ) {
+          document.documentElement.classList.add("dark");
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

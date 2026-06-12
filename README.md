@@ -10,7 +10,7 @@ MESALISTA es una página web donde los clientes de un restaurante reservan su me
 > | App | Carpeta | Qué es |
 > |---|---|---|
 > | **MESALISTA** | raíz (`/`) | Reservas online con Excel, Firestore y panel admin |
-> | **Porto Alegre** | [`/porto-alegre`](porto-alegre/README.md) | App móvil (PWA) para garzones: consumo de bebestibles por mesa |
+> | **Porto Alegre** | [`/porto-alegre`](porto-alegre/README.md) | App móvil (PWA) para garzones: consumo por mesa con sincronización en tiempo real (Supabase) |
 
 ## Funcionalidades
 
