@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Minus, Plus, Trash2 } from "lucide-react";
-import type { ConsumoMesa } from "../tipos";
+import type { Consumo } from "../tipos";
 import { getProducto } from "../data/catalogo";
 import { formatCLP } from "../util/dinero";
 
@@ -11,7 +11,7 @@ export const LineaConsumo = memo(function LineaConsumo({
   onCantidad,
   onEliminar,
 }: {
-  consumo: ConsumoMesa;
+  consumo: Consumo;
   bloqueada: boolean;
   onCantidad: (consumoId: string, delta: 1 | -1) => void;
   onEliminar: (consumoId: string) => void;
