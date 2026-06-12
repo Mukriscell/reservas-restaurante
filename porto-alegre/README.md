@@ -65,7 +65,7 @@ en 20 rondas de doble cierre simultáneo siempre ganó exactamente uno.
 ```
 porto-alegre/
   index.html                  → shell + manifest + tema sin parpadeo
-  railway.json                → build/arranque para Railway
+  vercel.json                 → despliegue en Vercel (SPA + service worker)
   supabase/migrations/
     0001_esquema.sql          → tablas, RLS, RPCs transaccionales, seed, Realtime
   public/
@@ -104,7 +104,7 @@ localStorage bajo `porto-alegre-mesas`.
 3. **Project Settings → API** → copia *Project URL* y la clave *anon public*.
 4. Configura las variables (build):
    - Local: copia `.env.example` a `.env` y complétalas.
-   - Railway/Vercel/Render: agrégalas como variables del servicio
+   - Vercel: agrégalas como *Environment Variables* del proyecto
      (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) y vuelve a desplegar.
 
 > La clave `anon` es pública por diseño (viaja en el navegador); la
@@ -150,7 +150,7 @@ pnpm install
 cp .env.example .env   # opcional: credenciales de Supabase (modo compartido)
 pnpm dev               # desarrollo → http://localhost:5173
 pnpm build             # typecheck + bundle de producción en dist/
-pnpm start             # sirve dist/ (igual que en Railway)
+pnpm start             # sirve dist/ localmente
 ```
 
 ## 8. Instalar en el celular (PWA)
@@ -160,16 +160,23 @@ Con la app desplegada (HTTPS), abre la URL en el teléfono:
 - **Android (Chrome)**: menú ⋮ → *Agregar a la pantalla principal* → *Instalar*.
 - **iPhone (Safari)**: *Compartir* → *Agregar a pantalla de inicio*.
 
-## 9. Desplegar en Railway (proyecto `observant-emotion`)
+## 9. Desplegar en Vercel
 
-1. En [railway.com](https://railway.com), proyecto **observant-emotion** →
-   **+ Create → GitHub Repo** → `Mukriscell/reservas-restaurante` (rama `main`).
-2. En el servicio: **Settings → Source → Root Directory** = `porto-alegre`.
-3. **Variables** → agrega `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY`
-   (sin ellas queda en modo local, sin sincronización entre garzones).
-4. **Settings → Networking → Generate Domain** → URL para los celulares.
+1. En [vercel.com](https://vercel.com), **Add New… → Project** → importa
+   `Mukriscell/reservas-restaurante`. (Si MESALISTA ya está en Vercel, este
+   es un **segundo proyecto** sobre el mismo repositorio.)
+2. **Root Directory** → *Edit* → selecciona `porto-alegre`. Vercel detecta
+   Vite solo (build `pnpm build`, salida `dist/`); `vercel.json` ya trae el
+   rewrite de SPA y el no-cache del service worker.
+3. **Environment Variables** → agrega `VITE_SUPABASE_URL` y
+   `VITE_SUPABASE_ANON_KEY` (sin ellas queda en modo local, sin
+   sincronización entre garzones).
+4. **Deploy** → la URL `*.vercel.app` resultante es la que se abre e
+   instala en los celulares.
 
-Cada `git push` a `main` re-despliega automáticamente.
+Producción se publica desde la rama configurada en **Settings → Git →
+Production Branch**; cada `git push` a esa rama re-despliega
+automáticamente (las demás ramas generan previews).
 
 ## 10. Decisiones técnicas
 
