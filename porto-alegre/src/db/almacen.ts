@@ -30,7 +30,7 @@ export interface EstadoApp {
 
 const CLAVE = "porto-alegre-mesas";
 const CLAVE_GARZON = "porto-alegre-garzon";
-const VERSION = 3;
+const VERSION = 4;
 
 export const TOTAL_MESAS = 100;
 /** Tope de registros de auditoría locales (protege el localStorage). */
@@ -125,6 +125,9 @@ function migrarV1(mesasV1: MesaV1[], consumosV1: ConsumoV1[]): EstadoApp {
       totalConsumos,
       totalAbonos: 0,
       saldoFinal: pagada ? totalMenu(vieja.menu) + totalConsumos : 0,
+      propinaPct: 0,
+      propinaMonto: 0,
+      totalFinal: pagada ? totalMenu(vieja.menu) + totalConsumos : 0,
     };
     estado.atenciones[atencionId] = atencion;
     estado.consumos.push(...filas);
@@ -162,6 +165,33 @@ function migrarV2(datos: Record<string, unknown>): EstadoApp {
   };
 }
 
+/** v3 → v4: atenciones con campos de propina (sin propina histórica). */
+function migrarV3(datos: Record<string, unknown>): EstadoApp {
+  const atencionesViejas = datos.atenciones as Record<
+    string,
+    Atencion & { propinaMonto?: number }
+  >;
+  const atenciones: Record<string, Atencion> = {};
+  for (const [id, a] of Object.entries(atencionesViejas)) {
+    atenciones[id] = {
+      ...a,
+      propinaPct: a.propinaPct ?? 0,
+      propinaMonto: a.propinaMonto ?? 0,
+      totalFinal:
+        a.totalFinal ??
+        (a.estado === "PAGADA" ? a.totalMenu + a.totalConsumos : 0),
+    };
+  }
+  return {
+    mesas: datos.mesas as Mesa[],
+    atenciones,
+    consumos: datos.consumos as Consumo[],
+    abonos: datos.abonos as Abono[],
+    garzones: datos.garzones as Garzon[],
+    auditoria: datos.auditoria as RegistroAuditoria[],
+  };
+}
+
 export function cargarEstado(): EstadoApp {
   try {
     const crudo = localStorage.getItem(CLAVE);
@@ -176,7 +206,12 @@ export function cargarEstado(): EstadoApp {
       datos = { version: 2, ...v2 } as { version: number } & Record<string, unknown>;
     }
     if (datos.version === 2 && Array.isArray(datos.mesas)) {
-      const migrado = migrarV2(datos);
+      datos = { version: 3, ...migrarV2(datos) } as {
+        version: number;
+      } & Record<string, unknown>;
+    }
+    if (datos.version === 3 && Array.isArray(datos.mesas)) {
+      const migrado = migrarV3(datos);
       guardarEstado(migrado);
       return migrado;
     }

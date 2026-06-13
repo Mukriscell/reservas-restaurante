@@ -25,6 +25,7 @@ function clasePill(accion: AccionAuditoria): string {
     case "ELIMINAR_PRODUCTO":
     case "ELIMINAR_ABONO":
     case "DESACTIVACION_USUARIO":
+    case "LIMPIAR_HISTORIAL":
       return "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300";
     case "REGISTRAR_ABONO":
     case "GENERAR_PRECUENTA":

@@ -1,5 +1,12 @@
 import { useMemo, useState } from "react";
-import { History, LogOut, Martini, ScrollText, UserRound } from "lucide-react";
+import {
+  History,
+  LogOut,
+  Martini,
+  ScrollText,
+  TrendingUp,
+  UserRound,
+} from "lucide-react";
 import { useAcciones, useEstadoApp, useGarzonActual } from "../estado/contexto";
 import { MODO_COMPARTIDO } from "../sync/supabase";
 import { TarjetaMesa } from "../componentes/TarjetaMesa";
@@ -12,12 +19,14 @@ export function PantallaMesas({
   onAbrirMesa,
   onVerHistorial,
   onVerAuditoria,
+  onVerDashboard,
   onCambiarGarzon,
 }: {
   seleccionadaId: string | null;
   onAbrirMesa: (mesaId: string) => void;
   onVerHistorial: () => void;
   onVerAuditoria: () => void;
+  onVerDashboard: () => void;
   onCambiarGarzon: () => void;
 }) {
   const { mesas, atenciones, garzones } = useEstadoApp();
@@ -67,6 +76,11 @@ export function PantallaMesas({
           <button onClick={onVerAuditoria} className="btn btn-borde">
             <ScrollText className="h-4 w-4" /> Auditoría
           </button>
+          {garzon?.rol === "ADMIN" && (
+            <button onClick={onVerDashboard} className="btn btn-borde">
+              <TrendingUp className="h-4 w-4" /> Dashboard
+            </button>
+          )}
           <span className="flex-1" />
           {MODO_COMPARTIDO && (
             <button

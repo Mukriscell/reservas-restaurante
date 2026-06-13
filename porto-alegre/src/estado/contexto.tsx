@@ -43,6 +43,8 @@ import {
   cargarHistorial as consultarHistorial,
   cargarMesa,
   cargarTodo,
+  dashboardPropinas,
+  limpiarHistorial as limpiarHistorialRemoto,
   getCliente,
   mapAbono,
   mapAtencion,
@@ -53,6 +55,7 @@ import {
   type FilaAbono,
   type FilaAtencion,
   type FilaConsumo,
+  type FilaDashboard,
   type FilaGarzon,
   type FilaMesa,
   type ResultadoAtencionMesa,
@@ -85,8 +88,14 @@ type Accion =
   | { tipo: "TRANSFERIR_ATENCION"; atencionId: string; garzonId: string }
   // Mutaciones de negocio (solo modo local; en compartido las resuelve la RPC)
   | { tipo: "ABRIR_ATENCION"; atencion: Atencion }
-  | { tipo: "CERRAR_ATENCION"; atencionId: string }
+  | {
+      tipo: "CERRAR_ATENCION";
+      atencionId: string;
+      propinaPct: number;
+      propinaMonto: number;
+    }
   | { tipo: "REABRIR_ATENCION"; atencionId: string }
+  | { tipo: "LIMPIAR_HISTORIAL"; desde: string | null; hasta: string | null }
   // Sincronización (valores autoritativos del servidor o altas locales)
   | { tipo: "CARGAR_ESTADO"; estado: EstadoApp }
   | { tipo: "APLICAR_MESA"; mesa: Mesa }
@@ -272,11 +281,15 @@ export function reducer(estado: EstadoApp, accion: Accion): EstadoApp {
       const atencion = estado.atenciones[accion.atencionId];
       if (!atencion || atencion.estado !== "PENDIENTE") return estado;
       const viva = conTotales(atencion, estado.consumos, estado.abonos);
+      const totalCta = viva.totalMenu + viva.totalConsumos;
       const cerrada: Atencion = {
         ...viva,
         estado: "PAGADA",
         fechaCierre: new Date().toISOString(),
-        saldoFinal: viva.totalMenu + viva.totalConsumos - viva.totalAbonos,
+        saldoFinal: totalCta - viva.totalAbonos,
+        propinaPct: accion.propinaPct,
+        propinaMonto: accion.propinaMonto,
+        totalFinal: totalCta + accion.propinaMonto,
       };
       return {
         ...conAtencion(estado, cerrada),
@@ -311,6 +324,33 @@ export function reducer(estado: EstadoApp, accion: Accion): EstadoApp {
             ? { ...m, estado: "OCUPADA", atencionActualId: atencion.id }
             : m
         ),
+      };
+    }
+
+    case "LIMPIAR_HISTORIAL": {
+      // Borra del historial las atenciones PAGADAS cerradas en el rango;
+      // nunca toca garzones ni la auditoría.
+      const desde = accion.desde ? new Date(accion.desde).getTime() : -Infinity;
+      const hasta = accion.hasta ? new Date(accion.hasta).getTime() : Infinity;
+      const enRango = (a: Atencion) => {
+        if (a.estado !== "PAGADA" || !a.fechaCierre) return false;
+        const t = new Date(a.fechaCierre).getTime();
+        return t >= desde && t < hasta;
+      };
+      const aBorrar = new Set(
+        Object.values(estado.atenciones)
+          .filter(enRango)
+          .map((a) => a.id)
+      );
+      if (aBorrar.size === 0) return estado;
+      const atenciones = Object.fromEntries(
+        Object.entries(estado.atenciones).filter(([id]) => !aBorrar.has(id))
+      );
+      return {
+        ...estado,
+        atenciones,
+        consumos: estado.consumos.filter((c) => !aBorrar.has(c.atencionId)),
+        abonos: estado.abonos.filter((a) => !aBorrar.has(a.atencionId)),
       };
     }
 
@@ -409,9 +449,23 @@ export interface AccionesApp {
     observacion: string
   ): Promise<boolean>;
   eliminarAbono(abonoId: string): Promise<void>;
-  /** false si la atención ya había sido cerrada por otro garzón. */
-  cerrarAtencion(atencionId: string): Promise<boolean>;
+  /**
+   * Cobra la mesa con la propina elegida (pct y monto; 0/0 = sin propina).
+   * false si la atención ya había sido cerrada por otro garzón.
+   */
+  cerrarAtencion(
+    atencionId: string,
+    propinaPct: number,
+    propinaMonto: number
+  ): Promise<boolean>;
+  /** Reabre una cuenta cerrada (solo ADMIN). */
   reabrirAtencion(atencionId: string): Promise<boolean>;
+  /** Limpia el historial de PAGADAS en el rango (solo ADMIN). Devuelve
+   *  cuántas se borraron, o null si no se pudo. */
+  limpiarHistorial(
+    desde: string | null,
+    hasta: string | null
+  ): Promise<number | null>;
   /** Traspasa la atención abierta a otro garzón (TRANSFERENCIA_MESA). */
   transferirAtencion(atencionId: string, garzonNuevoId: string): Promise<boolean>;
   /** Gestión de usuarios (solo ADMIN en la interfaz). */
@@ -946,6 +1000,9 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
             totalConsumos: 0,
             totalAbonos: 0,
             saldoFinal: 0,
+            propinaPct: 0,
+            propinaMonto: 0,
+            totalFinal: 0,
           };
           const mesa = estadoRef.current.mesas.find((m) => m.id === mesaId);
           if (!mesa || mesa.estado === "OCUPADA") return null;
@@ -1191,10 +1248,13 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
         }
       },
 
-      async cerrarAtencion(atencionId) {
+      async cerrarAtencion(atencionId, propinaPct, propinaMonto) {
+        const pct = Math.max(0, Math.min(100, Math.round(propinaPct || 0)));
+        const propina = Math.max(0, Math.round(propinaMonto || 0));
         if (!MODO_COMPARTIDO) {
           const atencion = estadoRef.current.atenciones[atencionId];
           if (atencion?.estado === "PENDIENTE") {
+            const total = totalCuenta(atencion);
             auditarLocal({
               usuarioId: garzonRef.current,
               accion: "CIERRE_MESA",
@@ -1205,19 +1265,31 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
               valorAnterior: { estado: "PENDIENTE" },
               valorNuevo: {
                 estado: "PAGADA",
-                total: totalCuenta(atencion),
+                total,
                 abonos: atencion.totalAbonos,
                 saldo: saldoPendiente(atencion),
+                propinaPct: pct,
+                propina,
+                totalFinal: total + propina,
               },
-              observacion: "",
+              observacion: propina > 0 ? "Con propina" : "Sin propina",
             });
           }
-          dispatch({ tipo: "CERRAR_ATENCION", atencionId });
+          dispatch({
+            tipo: "CERRAR_ATENCION",
+            atencionId,
+            propinaPct: pct,
+            propinaMonto: propina,
+          });
           return true;
         }
         if (sinConexion()) return false;
         try {
-          await rpcAtencionMesa("cerrar_atencion", { p_atencion_id: atencionId });
+          await rpcAtencionMesa("cerrar_atencion", {
+            p_atencion_id: atencionId,
+            p_propina_pct: pct,
+            p_propina_monto: propina,
+          });
           return true;
         } catch (e: unknown) {
           avisar(
@@ -1230,6 +1302,14 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
 
       async reabrirAtencion(atencionId) {
         if (!MODO_COMPARTIDO) {
+          // La reapertura es exclusiva de ADMIN.
+          const actor = estadoRef.current.garzones.find(
+            (g) => g.id === garzonRef.current
+          );
+          if (actor?.rol !== "ADMIN") {
+            avisar("Solo un ADMIN puede reabrir una cuenta");
+            return false;
+          }
           const atencion = estadoRef.current.atenciones[atencionId];
           const mesa = atencion
             ? estadoRef.current.mesas.find((m) => m.id === atencion.mesaId)
@@ -1338,6 +1418,58 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
           void rpc("registrar_precuenta", {
             p_atencion_id: atencionId,
           }).catch(() => undefined);
+        }
+      },
+
+      async limpiarHistorial(desde, hasta) {
+        const actor = estadoRef.current.garzones.find(
+          (g) => g.id === garzonRef.current
+        );
+        if (actor?.rol !== "ADMIN") {
+          avisar("Solo un ADMIN puede limpiar el historial");
+          return null;
+        }
+        if (!MODO_COMPARTIDO) {
+          const enRango = (a: Atencion) => {
+            if (a.estado !== "PAGADA" || !a.fechaCierre) return false;
+            const t = new Date(a.fechaCierre).getTime();
+            return (
+              (!desde || t >= new Date(desde).getTime()) &&
+              (!hasta || t < new Date(hasta).getTime())
+            );
+          };
+          const cuentas = Object.values(estadoRef.current.atenciones).filter(
+            enRango
+          ).length;
+          auditarLocal({
+            usuarioId: garzonRef.current,
+            accion: "LIMPIAR_HISTORIAL",
+            entidad: "atenciones",
+            entidadId: null,
+            mesaNumero: null,
+            atencionId: null,
+            valorAnterior: null,
+            valorNuevo: { cuentas, desde, hasta },
+            observacion: cuentas === 1 ? "1 cuenta" : `${cuentas} cuentas`,
+          });
+          dispatch({ tipo: "LIMPIAR_HISTORIAL", desde, hasta });
+          return cuentas;
+        }
+        if (sinConexion()) return null;
+        try {
+          const n = await limpiarHistorialRemoto(desde, hasta);
+          // El historial se relee bajo demanda; quitamos las locales en rango.
+          dispatch({ tipo: "LIMPIAR_HISTORIAL", desde, hasta });
+          avisar(
+            n === 1 ? "1 cuenta eliminada del historial" : `${n} cuentas eliminadas`,
+            "exito"
+          );
+          return n;
+        } catch (e: unknown) {
+          avisar(
+            e instanceof ErrorRpc ? e.message : "No se pudo limpiar el historial"
+          );
+          return null;
         }
       },
 
@@ -1560,7 +1692,8 @@ export function useDetalleAtencion(atencionId: string): {
  *  primero. Nunca se consulta el estado actual de las mesas. */
 export function useHistorial(
   mesaId?: string,
-  limite = 100
+  limite = 100,
+  version = 0
 ): { atenciones: Atencion[]; cargando: boolean } {
   const estado = useEstadoApp();
   const [remotas, setRemotas] = useState<Atencion[]>([]);
@@ -1581,7 +1714,7 @@ export function useHistorial(
     return () => {
       activo = false;
     };
-  }, [mesaId, limite]);
+  }, [mesaId, limite, version]);
 
   const atenciones = useMemo(() => {
     const porId = new Map<string, Atencion>();
@@ -1602,4 +1735,88 @@ export function useHistorial(
   }, [remotas, estado.atenciones, mesaId, limite]);
 
   return { atenciones, cargando };
+}
+
+export interface ResumenPropinas {
+  filas: FilaDashboard[];
+  totalPropinas: number;
+  totalVentas: number;
+  cuentas: number;
+  /** Propina promedio por cuenta cobrada. */
+  promedioPropina: number;
+}
+
+/**
+ * Dashboard de propinas (solo ADMIN): total, promedio y ranking por
+ * garzón. En modo compartido lo agrega el servidor; en local se calcula
+ * desde las atenciones PAGADAS. `version` fuerza recarga manual.
+ */
+export function useDashboard(
+  desde: string | null,
+  hasta: string | null,
+  version = 0
+): { resumen: ResumenPropinas; cargando: boolean } {
+  const estado = useEstadoApp();
+  const [filasRemotas, setFilasRemotas] = useState<FilaDashboard[]>([]);
+  const [cargando, setCargando] = useState(MODO_COMPARTIDO);
+
+  useEffect(() => {
+    if (!MODO_COMPARTIDO) return;
+    let activo = true;
+    setCargando(true);
+    dashboardPropinas(desde, hasta)
+      .then((filas) => {
+        if (activo) setFilasRemotas(filas);
+      })
+      .catch(() => {
+        if (activo) setFilasRemotas([]);
+      })
+      .finally(() => {
+        if (activo) setCargando(false);
+      });
+    return () => {
+      activo = false;
+    };
+  }, [desde, hasta, version]);
+
+  const resumen = useMemo<ResumenPropinas>(() => {
+    let filas: FilaDashboard[];
+    if (MODO_COMPARTIDO) {
+      filas = filasRemotas;
+    } else {
+      const d = desde ? new Date(desde).getTime() : -Infinity;
+      const h = hasta ? new Date(hasta).getTime() : Infinity;
+      const porGarzon = new Map<string, FilaDashboard>();
+      for (const a of Object.values(estado.atenciones)) {
+        if (a.estado !== "PAGADA" || !a.fechaCierre) continue;
+        const t = new Date(a.fechaCierre).getTime();
+        if (t < d || t >= h) continue;
+        const id = a.garzonId ?? "—";
+        const nombre =
+          estado.garzones.find((g) => g.id === a.garzonId)?.nombre ?? "—";
+        const fila =
+          porGarzon.get(id) ??
+          { garzonId: a.garzonId, nombre, cuentas: 0, totalPropinas: 0, totalVentas: 0 };
+        fila.cuentas += 1;
+        fila.totalPropinas += a.propinaMonto;
+        fila.totalVentas += a.totalMenu + a.totalConsumos;
+        porGarzon.set(id, fila);
+      }
+      filas = [...porGarzon.values()].sort(
+        (x, y) => y.totalPropinas - x.totalPropinas || y.cuentas - x.cuentas
+      );
+    }
+    const totalPropinas = filas.reduce((s, f) => s + f.totalPropinas, 0);
+    const totalVentas = filas.reduce((s, f) => s + f.totalVentas, 0);
+    const cuentas = filas.reduce((s, f) => s + f.cuentas, 0);
+    return {
+      filas,
+      totalPropinas,
+      totalVentas,
+      cuentas,
+      promedioPropina: cuentas > 0 ? Math.round(totalPropinas / cuentas) : 0,
+    };
+  }, [filasRemotas, estado.atenciones, estado.garzones, desde, hasta]);
+
+  return { resumen, cargando };
 }

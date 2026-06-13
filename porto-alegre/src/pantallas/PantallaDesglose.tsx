@@ -181,6 +181,26 @@ export function PantallaDesglose({
               {formatCLP(totalCuenta(atencion))}
             </span>
           </p>
+          {atencion.propinaMonto > 0 && (
+            <>
+              <p className="flex items-baseline justify-between text-sm">
+                <span className="font-semibold text-white/70">
+                  Propina ({atencion.propinaPct}%)
+                </span>
+                <span className="font-bold text-white">
+                  +{formatCLP(atencion.propinaMonto)}
+                </span>
+              </p>
+              <p className="flex items-baseline justify-between text-sm">
+                <span className="font-semibold text-white/70">
+                  Total con propina
+                </span>
+                <span className="font-black text-amarillo-400">
+                  {formatCLP(atencion.totalFinal)}
+                </span>
+              </p>
+            </>
+          )}
           {atencion.totalAbonos > 0 && (
             <p className="flex items-baseline justify-between text-sm">
               <span className="font-semibold text-white/70">

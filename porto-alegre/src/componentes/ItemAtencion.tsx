@@ -45,6 +45,11 @@ export function ItemAtencion({
               abonos −{formatCLP(atencion.totalAbonos)}
             </p>
           )}
+          {atencion.propinaMonto > 0 && (
+            <p className="text-[11px] font-semibold text-verde-700 dark:text-verde-400">
+              propina +{formatCLP(atencion.propinaMonto)}
+            </p>
+          )}
         </div>
         <ChevronRight className="h-4 w-4 shrink-0 text-zinc-400" />
       </button>

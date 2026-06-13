@@ -166,6 +166,27 @@ destacado, y pie *"Gracias por preferir Porto Alegre"*. Se puede
 cada emisión queda en la auditoría (`GENERAR_PRECUENTA`). jsPDF se carga
 bajo demanda (code-splitting), así que el bundle principal no crece.
 
+## 3e. Propinas, permisos por mesa y dashboard
+
+- **Propinas**: al cobrar se elige *sin propina*, *10% sugerido* o un
+  *monto personalizado*. La atención guarda `propina_pct`,
+  `propina_monto` y `total_final` (congelados al cerrar) y se muestran en
+  la precuenta PDF, el desglose, el historial y el dashboard. La propina
+  se fija dentro del mismo cierre (compare-and-set), así que no se
+  duplica ni con 25 garzones simultáneos.
+- **Permisos por mesa**: todos ven todas las mesas, pero **editar,
+  abonar, cobrar o transferir** una atención queda reservado a su garzón
+  dueño o a un ADMIN (`SIN_PERMISO_MESA` en el servidor; la mesa ajena se
+  muestra en *solo lectura*).
+- **Reapertura solo ADMIN**: reabrir una cuenta cerrada es exclusivo del
+  administrador (queda en auditoría como `REAPERTURA_MESA`).
+- **Limpieza de historial (ADMIN)**: `limpiar_historial(desde, hasta)`
+  borra atenciones PAGADAS y sus consumos/abonos en el rango de fechas;
+  **nunca** toca usuarios, productos ni la auditoría, y registra
+  `LIMPIAR_HISTORIAL`.
+- **Dashboard (ADMIN)**: total y promedio de propinas y **ranking por
+  garzón** (`dashboard_propinas`), con rango Hoy / Este mes / Histórico.
+
 ## 4. Estructura de carpetas
 
 ```
@@ -181,6 +202,9 @@ porto-alegre/
     0004_autenticacion.sql    → Supabase Auth: perfiles enlazados,
                                 identidad desde auth.uid(), RLS solo
                                 para usuarios activos
+    0005_propinas_historial.sql → propinas al cobrar, permiso por dueño,
+                                reapertura solo-ADMIN, limpieza de
+                                historial y dashboard de propinas
   public/
     manifest.webmanifest      → identidad de la app instalable
     sw.js                     → service worker (offline tras primera carga)
@@ -229,8 +253,9 @@ en localStorage bajo `porto-alegre-mesas`.
 1. Crea un proyecto gratis en [supabase.com](https://supabase.com).
 2. **SQL Editor → New query** → pega y ejecuta (**Run**), en orden:
    [`0002_atenciones.sql`](supabase/migrations/0002_atenciones.sql),
-   [`0003_auditoria.sql`](supabase/migrations/0003_auditoria.sql) y
-   [`0004_autenticacion.sql`](supabase/migrations/0004_autenticacion.sql).
+   [`0003_auditoria.sql`](supabase/migrations/0003_auditoria.sql),
+   [`0004_autenticacion.sql`](supabase/migrations/0004_autenticacion.sql) y
+   [`0005_propinas_historial.sql`](supabase/migrations/0005_propinas_historial.sql).
    Sirven igual para un proyecto nuevo o para actualizar el esquema
    viejo, y son idempotentes: re-ejecutarlos no borra historial ni
    auditoría.

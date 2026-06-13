@@ -174,6 +174,9 @@ export interface FilaAtencion {
   total_consumos: number;
   total_abonos: number;
   saldo_final: number;
+  propina_pct?: number;
+  propina_monto?: number;
+  total_final?: number;
 }
 
 export interface FilaConsumo {
@@ -260,6 +263,9 @@ export function mapAtencion(fila: FilaAtencion): Atencion {
     totalConsumos: fila.total_consumos,
     totalAbonos: fila.total_abonos,
     saldoFinal: fila.saldo_final,
+    propinaPct: fila.propina_pct ?? 0,
+    propinaMonto: fila.propina_monto ?? 0,
+    totalFinal: fila.total_final ?? 0,
   };
 }
 
@@ -462,6 +468,50 @@ export async function consultarAuditoria(
   return (data as FilaAuditoria[]).map(mapAuditoria);
 }
 
+/** Una fila del dashboard de propinas (agregado por garzón). */
+export interface FilaDashboard {
+  garzonId: string | null;
+  nombre: string;
+  cuentas: number;
+  totalPropinas: number;
+  totalVentas: number;
+}
+
+/** Ranking de propinas por garzón (solo ADMIN; rango opcional). */
+export async function dashboardPropinas(
+  desde: string | null,
+  hasta: string | null
+): Promise<FilaDashboard[]> {
+  const filas = await rpc<
+    {
+      garzon_id: string | null;
+      nombre: string;
+      cuentas: number;
+      total_propinas: number;
+      total_ventas: number;
+    }[]
+  >("dashboard_propinas", { p_desde: desde, p_hasta: hasta });
+  return (filas ?? []).map((f) => ({
+    garzonId: f.garzon_id,
+    nombre: f.nombre,
+    cuentas: Number(f.cuentas),
+    totalPropinas: Number(f.total_propinas),
+    totalVentas: Number(f.total_ventas),
+  }));
+}
+
+/** Limpia el historial de atenciones PAGADAS en el rango (solo ADMIN). */
+export async function limpiarHistorial(
+  desde: string | null,
+  hasta: string | null
+): Promise<number> {
+  const n = await rpc<number>("limpiar_historial", {
+    p_desde: desde,
+    p_hasta: hasta,
+  });
+  return Number(n ?? 0);
+}
+
 /** Ids de las atenciones de un garzón (para su vista de auditoría). */
 export async function atencionesDeGarzon(garzonId: string): Promise<string[]> {
   const sb = getCliente();
@@ -496,6 +546,8 @@ const MENSAJES: Record<string, string> = {
   NO_AUTENTICADO: "Tu sesión expiró: vuelve a iniciar sesión",
   USUARIO_DESACTIVADO: "Tu cuenta está desactivada: habla con el administrador",
   SOLO_ADMIN: "Solo un ADMIN puede hacer eso",
+  SIN_PERMISO_MESA: "Esta mesa es de otro garzón: solo lectura",
+  PROPINA_INVALIDA: "La propina no es válida",
 };
 
 export class ErrorRpc extends Error {

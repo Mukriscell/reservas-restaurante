@@ -22,6 +22,7 @@ export const ETIQUETAS_ACCION: Record<AccionAuditoria, string> = {
   REGISTRO_USUARIO: "Registro de usuario",
   INICIO_SESION: "Inicio de sesión",
   CIERRE_SESION: "Cierre de sesión",
+  LIMPIAR_HISTORIAL: "Limpiar historial",
 };
 
 function num(v: unknown): number | null {
@@ -73,10 +74,14 @@ export function descripcionAuditoria(r: RegistroAuditoria): string {
       const total = num(vn["total"]);
       const abonos = num(vn["abonos"]);
       const saldo = num(vn["saldo"]);
+      const propina = num(vn["propina"]);
       const partes = [];
       if (total !== null) partes.push(`Total ${formatCLP(total)}`);
       if (abonos) partes.push(`Abonos ${formatCLP(abonos)}`);
       if (saldo !== null) partes.push(`Saldo ${formatCLP(saldo)}`);
+      partes.push(
+        propina && propina > 0 ? `Propina ${formatCLP(propina)}` : "Sin propina"
+      );
       return partes.join(" · ");
     }
     case "REAPERTURA_MESA":
@@ -112,5 +117,9 @@ export function descripcionAuditoria(r: RegistroAuditoria): string {
     }
     case "DESACTIVACION_USUARIO":
       return `${texto(vn["nombre"])} desactivado`;
+    case "LIMPIAR_HISTORIAL": {
+      const cuentas = num(vn["cuentas"]);
+      return `${cuentas ?? 0} ${cuentas === 1 ? "cuenta" : "cuentas"} eliminadas del historial`;
+    }
   }
 }

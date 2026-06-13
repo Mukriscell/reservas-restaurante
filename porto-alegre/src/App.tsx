@@ -12,6 +12,7 @@ import { PantallaMesa } from "./pantallas/PantallaMesa";
 import { PantallaDesglose } from "./pantallas/PantallaDesglose";
 import { PantallaHistorial } from "./pantallas/PantallaHistorial";
 import { PantallaAuditoria } from "./pantallas/PantallaAuditoria";
+import { PantallaDashboard } from "./pantallas/PantallaDashboard";
 import { PantallaAcceso } from "./pantallas/PantallaAcceso";
 import { SelectorGarzon } from "./componentes/SelectorGarzon";
 import { Aviso } from "./componentes/Aviso";
@@ -21,6 +22,7 @@ type Vista =
   | { tipo: "mesa"; mesaId: string }
   | { tipo: "historial" }
   | { tipo: "auditoria" }
+  | { tipo: "dashboard" }
   | {
       tipo: "desglose";
       atencionId: string;
@@ -45,12 +47,17 @@ function Navegacion() {
           }}
           onVerHistorial={() => setVista({ tipo: "historial" })}
           onVerAuditoria={() => setVista({ tipo: "auditoria" })}
+          onVerDashboard={() => setVista({ tipo: "dashboard" })}
           onCambiarGarzon={() => setSelectorAbierto(true)}
         />
       )}
 
       {vista.tipo === "auditoria" && (
         <PantallaAuditoria onVolver={() => setVista({ tipo: "mesas" })} />
+      )}
+
+      {vista.tipo === "dashboard" && (
+        <PantallaDashboard onVolver={() => setVista({ tipo: "mesas" })} />
       )}
 
       {vista.tipo === "mesa" && (

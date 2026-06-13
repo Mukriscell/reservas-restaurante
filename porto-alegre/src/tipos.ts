@@ -58,6 +58,11 @@ export interface Atencion {
   totalConsumos: number;
   totalAbonos: number;
   saldoFinal: number;
+  /** Propina fijada al cobrar (0 si "sin propina"). */
+  propinaPct: number;
+  propinaMonto: number; // CLP
+  /** Total de la cuenta + propina, congelado al cerrar. */
+  totalFinal: number; // CLP
 }
 
 export interface Producto {
@@ -106,7 +111,11 @@ export type AccionAuditoria =
   | "DESACTIVACION_USUARIO"
   | "REGISTRO_USUARIO"
   | "INICIO_SESION"
-  | "CIERRE_SESION";
+  | "CIERRE_SESION"
+  | "LIMPIAR_HISTORIAL";
+
+/** Porcentaje sugerido de propina (botón "10%"). */
+export const PROPINA_SUGERIDA_PCT = 10;
 
 /**
  * Registro de auditoría INALTERABLE: nunca se modifica ni se elimina.
@@ -136,4 +145,14 @@ export function totalCuenta(a: Atencion): number {
 /** Saldo pendiente: total de la cuenta menos lo ya abonado. */
 export function saldoPendiente(a: Atencion): number {
   return totalCuenta(a) - a.totalAbonos;
+}
+
+/** Propina sugerida (10%) sobre el total de la cuenta. */
+export function propinaSugerida(a: Atencion): number {
+  return Math.round((totalCuenta(a) * PROPINA_SUGERIDA_PCT) / 100);
+}
+
+/** Total de la cuenta más la propina ya fijada (totalFinal en vivo). */
+export function totalConPropina(a: Atencion): number {
+  return totalCuenta(a) + a.propinaMonto;
 }

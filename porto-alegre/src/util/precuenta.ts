@@ -1,5 +1,10 @@
 import type { Abono, Atencion, Consumo } from "../tipos";
-import { totalCuenta, saldoPendiente } from "../tipos";
+import {
+  PROPINA_SUGERIDA_PCT,
+  propinaSugerida,
+  saldoPendiente,
+  totalCuenta,
+} from "../tipos";
 import { getProducto } from "../data/catalogo";
 import { desgloseMenu, getMenuBuffet } from "../data/menus";
 import { formatCLP } from "../util/dinero";
@@ -244,6 +249,27 @@ export async function generarPrecuenta(datos: DatosPrecuenta): Promise<Blob> {
       doc.text(`-${plata(abono.monto)}`, xDer, y, { align: "right" });
       y += 4.2;
     }
+  }
+
+  // Propina: la fijada (reimpresión de una cuenta cerrada) o, en una
+  // mesa aún abierta, la sugerida del 10% como referencia para el cliente.
+  const propina =
+    atencion.propinaMonto > 0 ? atencion.propinaMonto : propinaSugerida(atencion);
+  const etiquetaPropina =
+    atencion.propinaMonto > 0
+      ? `Propina (${atencion.propinaPct}%):`
+      : `Propina sugerida (${PROPINA_SUGERIDA_PCT}%):`;
+  if (propina > 0) {
+    doc.setFont("helvetica", "normal");
+    doc.text(etiquetaPropina, MARGEN, y);
+    doc.text(plata(propina), xDer, y, { align: "right" });
+    y += 4.2;
+    doc.setFont("helvetica", "bold");
+    doc.text("Total con propina:", MARGEN, y);
+    doc.text(plata(saldoPendiente(atencion) + propina), xDer, y, {
+      align: "right",
+    });
+    y += 4.2;
   }
 
   // Saldo pendiente destacado (caja azul marino + amarillo Brasil).

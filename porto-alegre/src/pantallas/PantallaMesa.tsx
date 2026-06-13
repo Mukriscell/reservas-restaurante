@@ -14,8 +14,9 @@ import {
   Share2,
   Sparkles,
 } from "lucide-react";
+import { Coins, Eye } from "lucide-react";
 import type { Abono, Atencion, Consumo, Garzon, Mesa } from "../tipos";
-import { saldoPendiente, totalCuenta } from "../tipos";
+import { propinaSugerida, saldoPendiente, totalCuenta } from "../tipos";
 import {
   compartirPrecuenta,
   descargarPrecuenta,
@@ -142,9 +143,28 @@ function VistaCuenta({
     "cobrar" | "precuenta" | "transferir" | null
   >(null);
   const [procesando, setProcesando] = useState(false);
+  // Propina elegida al cobrar: sin / 10% sugerido / personalizada.
+  const [propinaTipo, setPropinaTipo] = useState<"no" | "sugerida" | "custom">(
+    "sugerida"
+  );
+  const [propinaCustom, setPropinaCustom] = useState("");
 
   const total = totalCuenta(atencion);
   const saldo = saldoPendiente(atencion);
+
+  // La mesa de otro garzón es de solo lectura (salvo ADMIN): sin edición,
+  // abonos ni cierre. Todos pueden verla.
+  const puedeEditar =
+    garzonActual?.rol === "ADMIN" ||
+    (garzonActual != null && atencion.garzonId === garzonActual.id);
+
+  const propinaMonto =
+    propinaTipo === "no"
+      ? 0
+      : propinaTipo === "sugerida"
+        ? propinaSugerida(atencion)
+        : Math.max(0, Math.round(Number(propinaCustom) || 0));
+  const propinaPct = total > 0 ? Math.round((propinaMonto / total) * 100) : 0;
 
   const candidatosTransferencia = useMemo(
     () =>
@@ -171,7 +191,7 @@ function VistaCuenta({
 
   async function cobrar() {
     setProcesando(true);
-    const ok = await acciones.cerrarAtencion(atencion.id);
+    const ok = await acciones.cerrarAtencion(atencion.id, propinaPct, propinaMonto);
     setProcesando(false);
     setPanel(null);
     if (ok) onCobrada(atencion.id); // si otro garzón ganó, llega el aviso
@@ -241,12 +261,14 @@ function VistaCuenta({
             >
               <Receipt className="h-4 w-4" /> Desglose
             </button>
-            <button
-              onClick={() => setPanel(panel === "cobrar" ? null : "cobrar")}
-              className="btn btn-verde"
-            >
-              <CheckCircle2 className="h-4 w-4" /> Cobrar mesa
-            </button>
+            {puedeEditar && (
+              <button
+                onClick={() => setPanel(panel === "cobrar" ? null : "cobrar")}
+                className="btn btn-verde"
+              >
+                <CheckCircle2 className="h-4 w-4" /> Cobrar mesa
+              </button>
+            )}
           </div>
         </div>
 
@@ -258,37 +280,88 @@ function VistaCuenta({
           >
             <FileText className="h-4 w-4" /> Generar precuenta
           </button>
-          <button
-            onClick={() => setPanel(panel === "transferir" ? null : "transferir")}
-            className="btn btn-borde"
-          >
-            <ArrowRightLeft className="h-4 w-4" /> Transferir
-          </button>
-        </div>
-
-        {panel === "cobrar" && (
-          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl border border-verde-300 bg-verde-50 p-3 dark:border-verde-500/30 dark:bg-verde-500/10">
-            <span className="flex-1 text-sm font-semibold text-verde-900 dark:text-verde-200">
-              ¿Cobrar la mesa {mesa.numero} por {formatCLP(saldo)}
-              {atencion.totalAbonos > 0
-                ? ` (total ${formatCLP(total)} − abonos ${formatCLP(atencion.totalAbonos)})`
-                : ""}
-              ?
-            </span>
+          {puedeEditar && (
             <button
-              onClick={() => void cobrar()}
-              disabled={procesando}
-              className="btn btn-verde"
-            >
-              Confirmar pago
-            </button>
-            <button
-              onClick={() => setPanel(null)}
-              disabled={procesando}
+              onClick={() => setPanel(panel === "transferir" ? null : "transferir")}
               className="btn btn-borde"
             >
-              Volver
+              <ArrowRightLeft className="h-4 w-4" /> Transferir
             </button>
+          )}
+        </div>
+
+        {!puedeEditar && (
+          <p className="mt-2 flex items-center gap-2 rounded-xl bg-azul-50 px-3 py-2 text-sm font-semibold text-azul-800 dark:bg-azul-500/10 dark:text-azul-300">
+            <Eye className="h-4 w-4 shrink-0" /> Mesa de
+            {garzon ? ` ${garzon.nombre}` : " otro garzón"}: solo lectura. No
+            puedes editar, abonar ni cobrar.
+          </p>
+        )}
+
+        {panel === "cobrar" && puedeEditar && (
+          <div className="mt-3 rounded-2xl border border-verde-300 bg-verde-50 p-3 dark:border-verde-500/30 dark:bg-verde-500/10">
+            {/* Propina: sin / 10% sugerido / personalizada */}
+            <p className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wide text-verde-800 dark:text-verde-300">
+              <Coins className="h-4 w-4" /> Propina
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {(
+                [
+                  ["no", "Sin propina"],
+                  ["sugerida", `10% (${formatCLP(propinaSugerida(atencion))})`],
+                  ["custom", "Personalizada"],
+                ] as const
+              ).map(([valor, etiqueta]) => (
+                <button
+                  key={valor}
+                  onClick={() => setPropinaTipo(valor)}
+                  className={`rounded-xl border px-3 py-2 text-sm font-bold transition ${
+                    propinaTipo === valor
+                      ? "border-verde-600 bg-verde-600 text-white"
+                      : "border-zinc-300 bg-white text-zinc-700 dark:border-white/15 dark:bg-white/5 dark:text-zinc-200"
+                  }`}
+                >
+                  {etiqueta}
+                </button>
+              ))}
+              {propinaTipo === "custom" && (
+                <input
+                  value={propinaCustom}
+                  onChange={(e) =>
+                    setPropinaCustom(e.target.value.replace(/[^\d]/g, ""))
+                  }
+                  inputMode="numeric"
+                  placeholder="Monto $"
+                  aria-label="Propina personalizada en pesos"
+                  autoFocus
+                  className="min-h-10 w-28 rounded-xl border border-zinc-300 bg-white px-3 text-sm outline-none focus:border-verde-600 dark:border-white/15 dark:bg-white/5"
+                />
+              )}
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-verde-300/60 pt-3 dark:border-verde-500/20">
+              <span className="flex-1 text-sm font-semibold text-verde-900 dark:text-verde-200">
+                Mesa {mesa.numero}: {formatCLP(saldo)}
+                {propinaMonto > 0
+                  ? ` + propina ${formatCLP(propinaMonto)} = `
+                  : " a cobrar = "}
+                <span className="font-black">{formatCLP(saldo + propinaMonto)}</span>
+              </span>
+              <button
+                onClick={() => void cobrar()}
+                disabled={procesando}
+                className="btn btn-verde"
+              >
+                Confirmar pago
+              </button>
+              <button
+                onClick={() => setPanel(null)}
+                disabled={procesando}
+                className="btn btn-borde"
+              >
+                Volver
+              </button>
+            </div>
           </div>
         )}
 
@@ -370,7 +443,8 @@ function VistaCuenta({
       </Encabezado>
 
       <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-        {/* Carta: agregar productos en un toque */}
+        {/* Carta: agregar productos en un toque (oculta en solo lectura) */}
+        {puedeEditar && (
         <section className="tarjeta p-4">
           <h2 className="mb-2 text-sm font-bold text-verde-700 dark:text-verde-400">
             Carta
@@ -427,6 +501,7 @@ function VistaCuenta({
             )}
           </div>
         </section>
+        )}
 
         <div className="space-y-4">
           {/* Cuenta actual */}
@@ -444,7 +519,7 @@ function VistaCuenta({
                   <LineaConsumo
                     key={c.id}
                     consumo={c}
-                    bloqueada={false}
+                    bloqueada={!puedeEditar}
                     onCantidad={(consumoId, delta) =>
                       acciones.cambiarCantidad(atencion.id, consumoId, delta)
                     }
@@ -461,13 +536,13 @@ function VistaCuenta({
           <SeccionAbonos
             atencionId={atencion.id}
             abonos={abonos}
-            bloqueada={false}
+            bloqueada={!puedeEditar}
           />
 
           {/* Menú buffet (mismo desglose que la app de reservas) */}
           <SelectorMenu
             menu={atencion.menu}
-            bloqueada={false}
+            bloqueada={!puedeEditar}
             onFijar={(menu) => acciones.fijarMenu(atencion.id, menu)}
           />
         </div>
@@ -492,6 +567,7 @@ function VistaLibre({
   const { atenciones } = useEstadoApp();
   const acciones = useAcciones();
   const { garzon } = useGarzonActual();
+  const esAdmin = garzon?.rol === "ADMIN";
   const { atenciones: anteriores, cargando } = useHistorial(mesa.id, 10);
   const [procesando, setProcesando] = useState(false);
 
@@ -556,13 +632,15 @@ function VistaLibre({
             >
               <Receipt className="h-4 w-4" /> Ver desglose
             </button>
-            <button
-              onClick={() => void reabrir(recibo.id)}
-              disabled={procesando}
-              className="btn btn-borde"
-            >
-              <RotateCcw className="h-4 w-4" /> Reabrir cuenta
-            </button>
+            {esAdmin && (
+              <button
+                onClick={() => void reabrir(recibo.id)}
+                disabled={procesando}
+                className="btn btn-borde"
+              >
+                <RotateCcw className="h-4 w-4" /> Reabrir cuenta
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -612,7 +690,7 @@ function VistaLibre({
                 />
               ))}
             </ul>
-            {ultima && !recibo && (
+            {esAdmin && ultima && !recibo && (
               <button
                 onClick={() => void reabrir(ultima.id)}
                 disabled={procesando}
