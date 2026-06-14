@@ -9,84 +9,155 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { ConsumoMesa, Mesa, MenuMesa } from "../tipos";
+import {
+  saldoPendiente,
+  totalCuenta,
+  type Abono,
+  type Atencion,
+  type Consumo,
+  type Garzon,
+  type Mesa,
+  type MenuMesa,
+  type RegistroAuditoria,
+  type RolGarzon,
+} from "../tipos";
 import { getProducto } from "../data/catalogo";
 import { totalMenu } from "../data/menus";
 import {
   cargarEstado,
+  cargarGarzonId,
   guardarEstado,
+  guardarGarzonId,
+  MAX_AUDITORIA_LOCAL,
   type EstadoApp,
 } from "../db/almacen";
 import {
   MODO_COMPARTIDO,
   ErrorRpc,
+  actualizarContrasena as authActualizarContrasena,
+  cerrarSesionAuth,
+  iniciarSesion as authIniciarSesion,
+  recuperarContrasena as authRecuperarContrasena,
+  registrarse as authRegistrarse,
+  cargarAtencion,
+  cargarHistorial as consultarHistorial,
   cargarMesa,
   cargarTodo,
+  dashboardPropinas,
+  limpiarHistorial as limpiarHistorialRemoto,
   getCliente,
-  mapConsumo,
+  mapAbono,
+  mapAtencion,
+  mapGarzon,
   mapMesa,
+  mapConsumo,
   rpc,
+  type FilaAbono,
+  type FilaAtencion,
   type FilaConsumo,
+  type FilaDashboard,
+  type FilaGarzon,
   type FilaMesa,
+  type ResultadoAtencionMesa,
 } from "../sync/supabase";
 
 /**
  * Estado global de la app.
  *
- * MODO LOCAL (sin Supabase): el reducer es la fuente de verdad y se
- * persiste en localStorage.
+ * MODELO: las MESAS son permanentes (solo DISPONIBLE/OCUPADA); cada
+ * ocupación crea una ATENCIÓN a la que se asocian consumos y abonos.
+ * Cerrar la atención congela sus totales (historial) y libera la mesa.
  *
- * MODO COMPARTIDO (Supabase): cada mutación se aplica primero en local
- * (optimistic update) y se confirma con una RPC transaccional; los
+ * MODO LOCAL (sin Supabase): el reducer es la fuente de verdad y se
+ * persiste en localStorage, historial incluido.
+ *
+ * MODO COMPARTIDO (Supabase): los consumos y el menú se aplican primero
+ * en local (optimistic update) y se confirman con una RPC transaccional;
+ * abrir/cerrar/reabrir atenciones, abonos y garzones esperan la
+ * confirmación del servidor (operaciones con bloqueo lógico). Los
  * eventos Realtime de todos los garzones llegan como acciones APLICAR_*
- * con los valores autoritativos del servidor. Si una RPC es rechazada
- * (p. ej. la mesa ya fue cerrada), se avisa y se revalida esa mesa.
+ * con los valores autoritativos del servidor.
  */
 
 type Accion =
   // Mutaciones de negocio (modo local + capa optimista del compartido)
-  | { tipo: "AGREGAR_PRODUCTO"; mesaId: string; productoId: string }
-  | { tipo: "CAMBIAR_CANTIDAD"; mesaId: string; consumoId: string; delta: 1 | -1 }
-  | { tipo: "ELIMINAR_CONSUMO"; mesaId: string; consumoId: string }
-  | { tipo: "FIJAR_MENU"; mesaId: string; menu: MenuMesa | null }
-  | { tipo: "MARCAR_PAGADA"; mesaId: string }
-  | { tipo: "REABRIR"; mesaId: string }
-  | { tipo: "NUEVA_CUENTA"; mesaId: string }
-  // Sincronización (valores autoritativos del servidor)
+  | { tipo: "AGREGAR_PRODUCTO"; atencionId: string; productoId: string }
+  | { tipo: "CAMBIAR_CANTIDAD"; atencionId: string; consumoId: string; delta: 1 | -1 }
+  | { tipo: "ELIMINAR_CONSUMO"; atencionId: string; consumoId: string }
+  | { tipo: "FIJAR_MENU"; atencionId: string; menu: MenuMesa | null }
+  | { tipo: "TRANSFERIR_ATENCION"; atencionId: string; garzonId: string }
+  // Mutaciones de negocio (solo modo local; en compartido las resuelve la RPC)
+  | { tipo: "ABRIR_ATENCION"; atencion: Atencion }
+  | {
+      tipo: "CERRAR_ATENCION";
+      atencionId: string;
+      propinaPct: number;
+      propinaMonto: number;
+    }
+  | { tipo: "REABRIR_ATENCION"; atencionId: string }
+  | { tipo: "LIMPIAR_HISTORIAL"; desde: string | null; hasta: string | null }
+  // Sincronización (valores autoritativos del servidor o altas locales)
   | { tipo: "CARGAR_ESTADO"; estado: EstadoApp }
   | { tipo: "APLICAR_MESA"; mesa: Mesa }
-  | { tipo: "APLICAR_CONSUMO"; consumo: ConsumoMesa }
+  | { tipo: "APLICAR_ATENCION"; atencion: Atencion }
+  | { tipo: "APLICAR_CONSUMO"; consumo: Consumo }
   | { tipo: "QUITAR_CONSUMO"; consumoId: string }
-  | { tipo: "REEMPLAZAR_CONSUMOS_MESA"; mesaId: string; consumos: ConsumoMesa[] };
+  | { tipo: "APLICAR_ABONO"; abono: Abono }
+  | { tipo: "QUITAR_ABONO"; abonoId: string }
+  | { tipo: "APLICAR_GARZON"; garzon: Garzon }
+  | { tipo: "AGREGAR_AUDITORIA"; registro: RegistroAuditoria }
+  | {
+      tipo: "REEMPLAZAR_DETALLE";
+      atencionId: string;
+      consumos: Consumo[];
+      abonos: Abono[];
+    };
 
 const MAX_CANTIDAD = 99;
 
-function consumosDeMesa(consumos: ConsumoMesa[], mesaId: string): ConsumoMesa[] {
-  return consumos.filter((c) => c.mesaId === mesaId);
+function consumosDe(consumos: Consumo[], atencionId: string): Consumo[] {
+  return consumos.filter((c) => c.atencionId === atencionId);
 }
 
-/** Recalcula el total (menú + consumos) de la mesa indicada. */
-function conTotal(mesa: Mesa, consumos: ConsumoMesa[]): Mesa {
+function abonosDe(abonos: Abono[], atencionId: string): Abono[] {
+  return abonos.filter((a) => a.atencionId === atencionId);
+}
+
+/**
+ * Recalcula los totales vivos de una atención ABIERTA a partir de sus
+ * filas. Las atenciones PAGADAS conservan sus totales congelados.
+ */
+function conTotales(
+  atencion: Atencion,
+  consumos: Consumo[],
+  abonos: Abono[]
+): Atencion {
+  if (atencion.estado !== "PENDIENTE") return atencion;
   return {
-    ...mesa,
-    total:
-      totalMenu(mesa.menu) +
-      consumosDeMesa(consumos, mesa.id).reduce((s, c) => s + c.subtotal, 0),
+    ...atencion,
+    totalMenu: totalMenu(atencion.menu),
+    totalConsumos: consumosDe(consumos, atencion.id).reduce(
+      (s, c) => s + c.subtotal,
+      0
+    ),
+    totalAbonos: abonosDe(abonos, atencion.id).reduce((s, a) => s + a.monto, 0),
   };
 }
 
-function reemplazarMesa(estado: EstadoApp, mesa: Mesa): EstadoApp {
+function conAtencion(estado: EstadoApp, atencion: Atencion): EstadoApp {
   return {
     ...estado,
-    mesas: estado.mesas.map((m) => (m.id === mesa.id ? mesa : m)),
+    atenciones: { ...estado.atenciones, [atencion.id]: atencion },
   };
 }
 
-function conApertura(mesa: Mesa): Mesa {
-  return {
-    ...mesa,
-    fechaApertura: mesa.fechaApertura ?? new Date().toISOString(),
-  };
+function recalcular(estado: EstadoApp, atencionId: string): EstadoApp {
+  const atencion = estado.atenciones[atencionId];
+  if (!atencion) return estado;
+  return conAtencion(
+    estado,
+    conTotales(atencion, estado.consumos, estado.abonos)
+  );
 }
 
 export function reducer(estado: EstadoApp, accion: Accion): EstadoApp {
@@ -94,65 +165,208 @@ export function reducer(estado: EstadoApp, accion: Accion): EstadoApp {
     /* ------------------- sincronización (autoritativa) ------------------ */
 
     case "CARGAR_ESTADO": {
-      const { mesas, consumos } = accion.estado;
-      return { mesas: mesas.map((m) => conTotal(m, consumos)), consumos };
+      // El servidor manda mesas/garzones completos y las atenciones
+      // ABIERTAS; se conserva el historial ya conocido (PAGADAS).
+      const pagadas = Object.fromEntries(
+        Object.entries(estado.atenciones).filter(([, a]) => a.estado === "PAGADA")
+      );
+      const conocidas = { ...pagadas, ...accion.estado.atenciones };
+      return {
+        mesas: accion.estado.mesas,
+        garzones: accion.estado.garzones,
+        // La auditoría local solo aplica en modo local; se conserva.
+        auditoria: estado.auditoria,
+        atenciones: conocidas,
+        consumos: [
+          ...estado.consumos.filter(
+            (c) => pagadas[c.atencionId] && !accion.estado.atenciones[c.atencionId]
+          ),
+          ...accion.estado.consumos,
+        ],
+        abonos: [
+          ...estado.abonos.filter(
+            (a) => pagadas[a.atencionId] && !accion.estado.atenciones[a.atencionId]
+          ),
+          ...accion.estado.abonos,
+        ],
+      };
     }
 
     case "APLICAR_MESA": {
       if (!estado.mesas.some((m) => m.id === accion.mesa.id)) return estado;
-      return reemplazarMesa(estado, conTotal(accion.mesa, estado.consumos));
+      return {
+        ...estado,
+        mesas: estado.mesas.map((m) => (m.id === accion.mesa.id ? accion.mesa : m)),
+      };
     }
+
+    case "APLICAR_ATENCION":
+      return conAtencion(estado, accion.atencion);
+
+    case "APLICAR_GARZON": {
+      const existe = estado.garzones.some((g) => g.id === accion.garzon.id);
+      return {
+        ...estado,
+        garzones: existe
+          ? estado.garzones.map((g) => (g.id === accion.garzon.id ? accion.garzon : g))
+          : [...estado.garzones, accion.garzon],
+      };
+    }
+
+    case "AGREGAR_AUDITORIA":
+      // Append-only, igual que la tabla del servidor (con tope local).
+      return {
+        ...estado,
+        auditoria: [...estado.auditoria, accion.registro].slice(-MAX_AUDITORIA_LOCAL),
+      };
 
     case "APLICAR_CONSUMO": {
       const existe = estado.consumos.some((c) => c.id === accion.consumo.id);
       const consumos = existe
         ? estado.consumos.map((c) => (c.id === accion.consumo.id ? accion.consumo : c))
         : [...estado.consumos, accion.consumo];
-      const mesa = estado.mesas.find((m) => m.id === accion.consumo.mesaId);
-      const conConsumos = { ...estado, consumos };
-      return mesa ? reemplazarMesa(conConsumos, conTotal(mesa, consumos)) : conConsumos;
+      return recalcular({ ...estado, consumos }, accion.consumo.atencionId);
     }
 
     case "QUITAR_CONSUMO": {
       const quitado = estado.consumos.find((c) => c.id === accion.consumoId);
       if (!quitado) return estado;
       const consumos = estado.consumos.filter((c) => c.id !== accion.consumoId);
-      const mesa = estado.mesas.find((m) => m.id === quitado.mesaId);
-      const conConsumos = { ...estado, consumos };
-      return mesa ? reemplazarMesa(conConsumos, conTotal(mesa, consumos)) : conConsumos;
+      return recalcular({ ...estado, consumos }, quitado.atencionId);
     }
 
-    case "REEMPLAZAR_CONSUMOS_MESA": {
+    case "APLICAR_ABONO": {
+      const existe = estado.abonos.some((a) => a.id === accion.abono.id);
+      const abonos = existe
+        ? estado.abonos.map((a) => (a.id === accion.abono.id ? accion.abono : a))
+        : [...estado.abonos, accion.abono];
+      return recalcular({ ...estado, abonos }, accion.abono.atencionId);
+    }
+
+    case "QUITAR_ABONO": {
+      const quitado = estado.abonos.find((a) => a.id === accion.abonoId);
+      if (!quitado) return estado;
+      const abonos = estado.abonos.filter((a) => a.id !== accion.abonoId);
+      return recalcular({ ...estado, abonos }, quitado.atencionId);
+    }
+
+    case "REEMPLAZAR_DETALLE": {
       const consumos = [
-        ...estado.consumos.filter((c) => c.mesaId !== accion.mesaId),
+        ...estado.consumos.filter((c) => c.atencionId !== accion.atencionId),
         ...accion.consumos,
       ];
-      const mesa = estado.mesas.find((m) => m.id === accion.mesaId);
-      const conConsumos = { ...estado, consumos };
-      return mesa ? reemplazarMesa(conConsumos, conTotal(mesa, consumos)) : conConsumos;
+      const abonos = [
+        ...estado.abonos.filter((a) => a.atencionId !== accion.atencionId),
+        ...accion.abonos,
+      ];
+      return recalcular({ ...estado, consumos, abonos }, accion.atencionId);
     }
 
-    /* ----------------------- mutaciones de negocio ---------------------- */
+    /* --------------- ciclo de vida de la atención (modo local) ---------- */
+
+    case "ABRIR_ATENCION": {
+      const mesa = estado.mesas.find((m) => m.id === accion.atencion.mesaId);
+      if (!mesa || mesa.estado === "OCUPADA") return estado;
+      return {
+        ...conAtencion(estado, accion.atencion),
+        mesas: estado.mesas.map((m) =>
+          m.id === mesa.id
+            ? { ...m, estado: "OCUPADA", atencionActualId: accion.atencion.id }
+            : m
+        ),
+      };
+    }
+
+    case "CERRAR_ATENCION": {
+      const atencion = estado.atenciones[accion.atencionId];
+      if (!atencion || atencion.estado !== "PENDIENTE") return estado;
+      const viva = conTotales(atencion, estado.consumos, estado.abonos);
+      const totalCta = viva.totalMenu + viva.totalConsumos;
+      const cerrada: Atencion = {
+        ...viva,
+        estado: "PAGADA",
+        fechaCierre: new Date().toISOString(),
+        saldoFinal: totalCta - viva.totalAbonos,
+        propinaPct: accion.propinaPct,
+        propinaMonto: accion.propinaMonto,
+        totalFinal: totalCta + accion.propinaMonto,
+      };
+      return {
+        ...conAtencion(estado, cerrada),
+        mesas: estado.mesas.map((m) =>
+          m.id === atencion.mesaId
+            ? { ...m, estado: "DISPONIBLE", atencionActualId: null }
+            : m
+        ),
+      };
+    }
+
+    case "REABRIR_ATENCION": {
+      const atencion = estado.atenciones[accion.atencionId];
+      if (!atencion || atencion.estado !== "PAGADA") return estado;
+      const mesa = estado.mesas.find((m) => m.id === atencion.mesaId);
+      if (!mesa || mesa.estado === "OCUPADA") return estado;
+      // Solo la última atención de la mesa se puede reabrir.
+      const hayPosterior = Object.values(estado.atenciones).some(
+        (a) => a.mesaId === atencion.mesaId && a.numero > atencion.numero
+      );
+      if (hayPosterior) return estado;
+      const abierta: Atencion = {
+        ...atencion,
+        estado: "PENDIENTE",
+        fechaCierre: null,
+        saldoFinal: 0,
+      };
+      return {
+        ...conAtencion(estado, abierta),
+        mesas: estado.mesas.map((m) =>
+          m.id === mesa.id
+            ? { ...m, estado: "OCUPADA", atencionActualId: atencion.id }
+            : m
+        ),
+      };
+    }
+
+    case "LIMPIAR_HISTORIAL": {
+      // Borra del historial las atenciones PAGADAS cerradas en el rango;
+      // nunca toca garzones ni la auditoría.
+      const desde = accion.desde ? new Date(accion.desde).getTime() : -Infinity;
+      const hasta = accion.hasta ? new Date(accion.hasta).getTime() : Infinity;
+      const enRango = (a: Atencion) => {
+        if (a.estado !== "PAGADA" || !a.fechaCierre) return false;
+        const t = new Date(a.fechaCierre).getTime();
+        return t >= desde && t < hasta;
+      };
+      const aBorrar = new Set(
+        Object.values(estado.atenciones)
+          .filter(enRango)
+          .map((a) => a.id)
+      );
+      if (aBorrar.size === 0) return estado;
+      const atenciones = Object.fromEntries(
+        Object.entries(estado.atenciones).filter(([id]) => !aBorrar.has(id))
+      );
+      return {
+        ...estado,
+        atenciones,
+        consumos: estado.consumos.filter((c) => !aBorrar.has(c.atencionId)),
+        abonos: estado.abonos.filter((a) => !aBorrar.has(a.atencionId)),
+      };
+    }
+
+    /* ----------------- mutaciones de la cuenta abierta ------------------ */
 
     default: {
-      const mesa = estado.mesas.find((m) => m.id === accion.mesaId);
-      if (!mesa) return estado;
-
-      // Una mesa PAGADA es de solo lectura: solo reabrir o cuenta nueva.
-      const esMutacionDeCuenta =
-        accion.tipo === "AGREGAR_PRODUCTO" ||
-        accion.tipo === "CAMBIAR_CANTIDAD" ||
-        accion.tipo === "ELIMINAR_CONSUMO" ||
-        accion.tipo === "FIJAR_MENU" ||
-        accion.tipo === "MARCAR_PAGADA";
-      if (mesa.estado === "PAGADA" && esMutacionDeCuenta) return estado;
+      const atencion = estado.atenciones[accion.atencionId];
+      // Una atención PAGADA es historial: de solo lectura.
+      if (!atencion || atencion.estado !== "PENDIENTE") return estado;
 
       switch (accion.tipo) {
         case "AGREGAR_PRODUCTO": {
           const existente = estado.consumos.find(
-            (c) => c.mesaId === mesa.id && c.productoId === accion.productoId
+            (c) => c.atencionId === atencion.id && c.productoId === accion.productoId
           );
-          let consumos: ConsumoMesa[];
+          let consumos: Consumo[];
           if (existente) {
             const cantidad = Math.min(existente.cantidad + 1, MAX_CANTIDAD);
             consumos = estado.consumos.map((c) =>
@@ -165,8 +379,8 @@ export function reducer(estado: EstadoApp, accion: Accion): EstadoApp {
             consumos = [
               ...estado.consumos,
               {
-                id: `c-${mesa.id}-${producto.id}`,
-                mesaId: mesa.id,
+                id: `c-${atencion.id}-${producto.id}`,
+                atencionId: atencion.id,
                 productoId: producto.id,
                 cantidad: 1,
                 precioUnitario: producto.precio,
@@ -174,65 +388,36 @@ export function reducer(estado: EstadoApp, accion: Accion): EstadoApp {
               },
             ];
           }
-          return reemplazarMesa(
-            { ...estado, consumos },
-            conTotal(conApertura(mesa), consumos)
-          );
+          return recalcular({ ...estado, consumos }, atencion.id);
         }
 
         case "CAMBIAR_CANTIDAD": {
           const consumos = estado.consumos.map((c) => {
-            if (c.id !== accion.consumoId || c.mesaId !== mesa.id) return c;
+            if (c.id !== accion.consumoId || c.atencionId !== atencion.id) return c;
             const cantidad = Math.min(
               Math.max(c.cantidad + accion.delta, 1),
               MAX_CANTIDAD
             );
             return { ...c, cantidad, subtotal: cantidad * c.precioUnitario };
           });
-          return reemplazarMesa({ ...estado, consumos }, conTotal(mesa, consumos));
+          return recalcular({ ...estado, consumos }, atencion.id);
         }
 
         case "ELIMINAR_CONSUMO": {
           const consumos = estado.consumos.filter(
-            (c) => !(c.id === accion.consumoId && c.mesaId === mesa.id)
+            (c) => !(c.id === accion.consumoId && c.atencionId === atencion.id)
           );
-          return reemplazarMesa({ ...estado, consumos }, conTotal(mesa, consumos));
+          return recalcular({ ...estado, consumos }, atencion.id);
         }
 
-        case "FIJAR_MENU": {
-          const base = { ...mesa, menu: accion.menu };
-          const abierta = accion.menu ? conApertura(base) : base;
-          return reemplazarMesa(estado, conTotal(abierta, estado.consumos));
-        }
-
-        case "MARCAR_PAGADA":
-          return reemplazarMesa(estado, {
-            ...mesa,
-            estado: "PAGADA",
-            fechaCierre: new Date().toISOString(),
-          });
-
-        case "REABRIR":
-          return reemplazarMesa(estado, {
-            ...mesa,
-            estado: "PENDIENTE",
-            fechaCierre: null,
-          });
-
-        case "NUEVA_CUENTA": {
-          const consumos = estado.consumos.filter((c) => c.mesaId !== mesa.id);
-          return reemplazarMesa(
-            { ...estado, consumos },
-            {
-              ...mesa,
-              estado: "PENDIENTE",
-              total: 0,
-              fechaApertura: null,
-              fechaCierre: null,
-              menu: null,
-            }
+        case "FIJAR_MENU":
+          return recalcular(
+            conAtencion(estado, { ...atencion, menu: accion.menu }),
+            atencion.id
           );
-        }
+
+        case "TRANSFERIR_ATENCION":
+          return conAtencion(estado, { ...atencion, garzonId: accion.garzonId });
       }
     }
   }
@@ -249,19 +434,79 @@ export interface AvisoApp {
 }
 
 export interface AccionesApp {
-  agregarProducto(mesaId: string, productoId: string): void;
-  cambiarCantidad(mesaId: string, consumoId: string, delta: 1 | -1): void;
-  eliminarConsumo(mesaId: string, consumoId: string): void;
-  fijarMenu(mesaId: string, menu: MenuMesa | null): void;
-  /** false si la mesa ya había sido cerrada por otro garzón (Caso 2). */
-  marcarPagada(mesaId: string): Promise<boolean>;
-  reabrirMesa(mesaId: string): Promise<void>;
-  nuevaCuenta(mesaId: string): Promise<void>;
+  /** Garzón que opera este dispositivo (persistido localmente). */
+  seleccionarGarzon(garzonId: string | null): void;
+  crearGarzon(nombre: string): Promise<Garzon | null>;
+  /** Devuelve el id de la atención creada, o null si la mesa ya fue ocupada. */
+  abrirAtencion(mesaId: string): Promise<string | null>;
+  agregarProducto(atencionId: string, productoId: string): void;
+  cambiarCantidad(atencionId: string, consumoId: string, delta: 1 | -1): void;
+  eliminarConsumo(atencionId: string, consumoId: string): void;
+  fijarMenu(atencionId: string, menu: MenuMesa | null): void;
+  agregarAbono(
+    atencionId: string,
+    monto: number,
+    observacion: string
+  ): Promise<boolean>;
+  eliminarAbono(abonoId: string): Promise<void>;
+  /**
+   * Cobra la mesa con la propina elegida (pct y monto; 0/0 = sin propina).
+   * false si la atención ya había sido cerrada por otro garzón.
+   */
+  cerrarAtencion(
+    atencionId: string,
+    propinaPct: number,
+    propinaMonto: number
+  ): Promise<boolean>;
+  /** Reabre una cuenta cerrada (solo ADMIN). */
+  reabrirAtencion(atencionId: string): Promise<boolean>;
+  /** Limpia el historial de PAGADAS en el rango (solo ADMIN). Devuelve
+   *  cuántas se borraron, o null si no se pudo. */
+  limpiarHistorial(
+    desde: string | null,
+    hasta: string | null
+  ): Promise<number | null>;
+  /** Traspasa la atención abierta a otro garzón (TRANSFERENCIA_MESA). */
+  transferirAtencion(atencionId: string, garzonNuevoId: string): Promise<boolean>;
+  /** Gestión de usuarios (solo ADMIN en la interfaz). */
+  modificarGarzon(garzonId: string, nombre: string, rol: RolGarzon): Promise<boolean>;
+  desactivarGarzon(garzonId: string): Promise<boolean>;
+  /** Deja constancia GENERAR_PRECUENTA en la auditoría. */
+  registrarPrecuenta(atencionId: string): void;
+  /* ------ Autenticación por mesero (modo compartido, Supabase Auth) ----- */
+  /** null si entró bien; si no, el error legible. Audita INICIO_SESION. */
+  iniciarSesion(email: string, contrasena: string): Promise<string | null>;
+  registrarse(
+    nombre: string,
+    email: string,
+    contrasena: string,
+    telefono: string
+  ): Promise<{ error: string | null; requiereConfirmacion: boolean }>;
+  /** Audita CIERRE_SESION y cierra la sesión de Supabase. */
+  cerrarSesion(): Promise<void>;
+  recuperarContrasena(email: string): Promise<string | null>;
+  actualizarContrasena(nueva: string): Promise<string | null>;
+}
+
+/** Sesión del mesero en este dispositivo (modo compartido). */
+export interface EstadoAuth {
+  /** true mientras Supabase restaura la sesión persistida. */
+  cargando: boolean;
+  userId: string | null;
+  email: string | null;
+  /** El usuario llegó desde un enlace de recuperar contraseña. */
+  recuperando: boolean;
+  terminarRecuperacion(): void;
 }
 
 const CtxEstado = createContext<EstadoApp | null>(null);
 const CtxAcciones = createContext<AccionesApp | null>(null);
 const CtxConexion = createContext<EstadoConexion>("local");
+const CtxGarzon = createContext<string | null>(null);
+const CtxAuth = createContext<EstadoAuth | null>(null);
+const CtxRevalidar = createContext<((atencionId: string) => Promise<void>) | null>(
+  null
+);
 const CtxAviso = createContext<{
   aviso: AvisoApp | null;
   cerrarAviso: () => void;
@@ -273,12 +518,25 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
   const [conexion, setConexion] = useState<EstadoConexion>(
     MODO_COMPARTIDO ? "conectando" : "local"
   );
+  // Modo local: garzón elegido en el dispositivo. Modo compartido: se
+  // deriva del perfil de la sesión autenticada (Supabase Auth).
+  const [garzonId, setGarzonId] = useState<string | null>(
+    MODO_COMPARTIDO ? null : cargarGarzonId
+  );
   const [aviso, setAviso] = useState<AvisoApp | null>(null);
+  const [sesion, setSesion] = useState<{
+    cargando: boolean;
+    userId: string | null;
+    email: string | null;
+    recuperando: boolean;
+  }>({ cargando: MODO_COMPARTIDO, userId: null, email: null, recuperando: false });
 
   const estadoRef = useRef(estado);
   estadoRef.current = estado;
   const conexionRef = useRef(conexion);
   conexionRef.current = conexion;
+  const garzonRef = useRef(garzonId);
+  garzonRef.current = garzonId;
 
   // Cache local: persistencia (modo local) o vista offline (compartido).
   useEffect(() => {
@@ -290,9 +548,52 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
   }, []);
   const cerrarAviso = useCallback(() => setAviso(null), []);
 
+  /* ----------------- Sesión por mesero (Supabase Auth) ----------------- */
+  useEffect(() => {
+    if (!MODO_COMPARTIDO) return;
+    let activo = true;
+    const sb = getCliente();
+    void sb.auth.getSession().then(({ data }) => {
+      if (!activo) return;
+      setSesion((s) => ({
+        ...s,
+        cargando: false,
+        userId: data.session?.user.id ?? null,
+        email: data.session?.user.email ?? null,
+      }));
+    });
+    const { data: suscripcion } = sb.auth.onAuthStateChange((evento, datos) => {
+      if (!activo) return;
+      setSesion((s) => ({
+        cargando: false,
+        userId: datos?.user.id ?? null,
+        email: datos?.user.email ?? null,
+        recuperando: evento === "PASSWORD_RECOVERY" ? true : s.recuperando,
+      }));
+    });
+    return () => {
+      activo = false;
+      suscripcion.subscription.unsubscribe();
+    };
+  }, []);
+
+  // El garzón del dispositivo ES el perfil de la cuenta autenticada.
+  useEffect(() => {
+    if (!MODO_COMPARTIDO) return;
+    const perfil = estado.garzones.find(
+      (g) => g.authUserId && g.authUserId === sesion.userId
+    );
+    setGarzonId(perfil?.id ?? null);
+  }, [sesion.userId, estado.garzones]);
+
   /* ------------------ Realtime + carga inicial (compartido) ------------ */
   useEffect(() => {
     if (!MODO_COMPARTIDO) return;
+    // Sin sesión no hay lecturas (RLS): el canal se monta al autenticarse.
+    if (!sesion.userId) {
+      setConexion("conectando");
+      return;
+    }
     let activo = true;
 
     const refrescar = () => {
@@ -319,6 +620,18 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
       )
       .on(
         "postgres_changes",
+        { event: "*", schema: "public", table: "atenciones" },
+        (p) => {
+          if (p.new && "id" in p.new) {
+            dispatch({
+              tipo: "APLICAR_ATENCION",
+              atencion: mapAtencion(p.new as FilaAtencion),
+            });
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
         { event: "*", schema: "public", table: "consumos" },
         (p) => {
           if (p.eventType === "DELETE") {
@@ -328,6 +641,33 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
             dispatch({
               tipo: "APLICAR_CONSUMO",
               consumo: mapConsumo(p.new as FilaConsumo),
+            });
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "abonos" },
+        (p) => {
+          if (p.eventType === "DELETE") {
+            const viejo = p.old as { id?: string };
+            if (viejo.id) dispatch({ tipo: "QUITAR_ABONO", abonoId: viejo.id });
+          } else if (p.new && "id" in p.new) {
+            dispatch({
+              tipo: "APLICAR_ABONO",
+              abono: mapAbono(p.new as FilaAbono),
+            });
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "garzones" },
+        (p) => {
+          if (p.new && "id" in p.new) {
+            dispatch({
+              tipo: "APLICAR_GARZON",
+              garzon: mapGarzon(p.new as FilaGarzon),
             });
           }
         }
@@ -353,16 +693,41 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
       window.removeEventListener("offline", alCaer);
       void getCliente().removeChannel(canal);
     };
-  }, []);
+  }, [sesion.userId]);
 
   /* --------------------------- Mutaciones ------------------------------ */
+
+  const revalidarAtencion = useCallback(async (atencionId: string) => {
+    try {
+      const datos = await cargarAtencion(atencionId);
+      if (datos) {
+        dispatch({ tipo: "APLICAR_ATENCION", atencion: datos.atencion });
+        if (datos.mesa) dispatch({ tipo: "APLICAR_MESA", mesa: datos.mesa });
+        dispatch({
+          tipo: "REEMPLAZAR_DETALLE",
+          atencionId,
+          consumos: datos.consumos,
+          abonos: datos.abonos,
+        });
+      }
+    } catch {
+      // Sin conexión: el canal repondrá el estado al reconectar.
+    }
+  }, []);
 
   const revalidarMesa = useCallback(async (mesaId: string) => {
     try {
       const datos = await cargarMesa(mesaId);
-      if (datos) {
-        dispatch({ tipo: "APLICAR_MESA", mesa: datos.mesa });
-        dispatch({ tipo: "REEMPLAZAR_CONSUMOS_MESA", mesaId, consumos: datos.consumos });
+      if (!datos) return;
+      dispatch({ tipo: "APLICAR_MESA", mesa: datos.mesa });
+      if (datos.atencion) {
+        dispatch({ tipo: "APLICAR_ATENCION", atencion: datos.atencion });
+        dispatch({
+          tipo: "REEMPLAZAR_DETALLE",
+          atencionId: datos.atencion.id,
+          consumos: datos.consumos,
+          abonos: datos.abonos,
+        });
       }
     } catch {
       // Sin conexión: el canal repondrá el estado al reconectar.
@@ -371,7 +736,7 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
 
   /** Optimistic update + RPC; ante rechazo: aviso y revalidación. */
   const optimista = useCallback(
-    (accion: Accion, mesaId: string, llamada: () => Promise<unknown>) => {
+    (accion: Accion, atencionId: string, llamada: () => Promise<unknown>) => {
       if (!MODO_COMPARTIDO) {
         dispatch(accion);
         return;
@@ -383,109 +748,836 @@ export function ProveedorApp({ children }: { children: ReactNode }) {
       dispatch(accion);
       llamada().catch((e: unknown) => {
         avisar(e instanceof ErrorRpc ? e.message : "No se pudo guardar el cambio");
-        void revalidarMesa(mesaId);
+        void revalidarAtencion(atencionId);
       });
     },
-    [avisar, revalidarMesa]
+    [avisar, revalidarAtencion]
   );
 
-  /** Operación compare-and-set (cerrar/reabrir/nueva): sin optimismo. */
-  const conBloqueo = useCallback(
+  /** RPC con bloqueo lógico que devuelve atención + mesa autoritativas. */
+  const rpcAtencionMesa = useCallback(
     async (
-      mesaId: string,
-      accionLocal: Accion,
-      fn: string
-    ): Promise<boolean> => {
-      if (!MODO_COMPARTIDO) {
-        dispatch(accionLocal);
-        return true;
-      }
-      if (conexionRef.current !== "online") {
-        avisar("Sin conexión: inténtalo cuando vuelva la señal");
-        return false;
-      }
-      try {
-        const fila = await rpc<FilaMesa>(fn, { p_mesa_id: mesaId });
-        dispatch({ tipo: "APLICAR_MESA", mesa: mapMesa(fila) });
-        if (fn === "nueva_cuenta") {
-          dispatch({ tipo: "REEMPLAZAR_CONSUMOS_MESA", mesaId, consumos: [] });
-        }
-        return true;
-      } catch (e: unknown) {
-        avisar(e instanceof ErrorRpc ? e.message : "No se pudo completar la operación");
-        void revalidarMesa(mesaId);
-        return false;
-      }
+      fn: string,
+      args: Record<string, unknown>
+    ): Promise<Atencion | null> => {
+      const r = await rpc<ResultadoAtencionMesa>(fn, args);
+      const atencion = mapAtencion(r.atencion);
+      dispatch({ tipo: "APLICAR_ATENCION", atencion });
+      dispatch({ tipo: "APLICAR_MESA", mesa: mapMesa(r.mesa) });
+      return atencion;
     },
-    [avisar, revalidarMesa]
+    []
+  );
+
+  const sinConexion = useCallback((): boolean => {
+    if (conexionRef.current !== "online") {
+      avisar("Sin conexión: inténtalo cuando vuelva la señal");
+      return true;
+    }
+    return false;
+  }, [avisar]);
+
+  /* --------------------------- Auditoría ------------------------------- */
+
+  // En modo compartido la auditoría la escriben las funciones SQL dentro
+  // de cada transacción; en modo local se replica aquí, append-only.
+  const auditSeq = useRef(0);
+  const auditarLocal = useCallback(
+    (
+      registro: Omit<
+        RegistroAuditoria,
+        "id" | "creadoEn" | "nombreUsuario" | "rolUsuario"
+      >
+    ) => {
+      if (MODO_COMPARTIDO) return;
+      const garzon = estadoRef.current.garzones.find(
+        (g) => g.id === registro.usuarioId
+      );
+      auditSeq.current += 1;
+      dispatch({
+        tipo: "AGREGAR_AUDITORIA",
+        registro: {
+          ...registro,
+          id: `aud-${Date.now()}-${auditSeq.current}`,
+          creadoEn: new Date().toISOString(),
+          nombreUsuario: garzon?.nombre ?? "sistema",
+          rolUsuario: garzon?.rol ?? "",
+        },
+      });
+    },
+    []
+  );
+
+  const numeroDeMesa = useCallback((mesaId: string | null): number | null => {
+    if (!mesaId) return null;
+    return estadoRef.current.mesas.find((m) => m.id === mesaId)?.numero ?? null;
+  }, []);
+
+  /**
+   * Cambio de garzón del dispositivo (SOLO modo local; en compartido la
+   * identidad sale de la sesión autenticada). Audita inicio/cierre.
+   */
+  const seleccionar = useCallback(
+    (nuevo: string | null) => {
+      if (MODO_COMPARTIDO) return;
+      const anterior = garzonRef.current;
+      if (anterior === nuevo) return;
+      const auditarSesion = (
+        garzonId2: string,
+        accion: "INICIO_SESION" | "CIERRE_SESION"
+      ) => {
+        auditarLocal({
+          usuarioId: garzonId2,
+          accion,
+          entidad: "garzones",
+          entidadId: garzonId2,
+          mesaNumero: null,
+          atencionId: null,
+          valorAnterior: null,
+          valorNuevo: null,
+          observacion: "",
+        });
+      };
+      if (anterior) auditarSesion(anterior, "CIERRE_SESION");
+      if (nuevo) auditarSesion(nuevo, "INICIO_SESION");
+      setGarzonId(nuevo);
+      guardarGarzonId(nuevo);
+    },
+    [auditarLocal]
   );
 
   const acciones = useMemo<AccionesApp>(
     () => ({
-      agregarProducto(mesaId, productoId) {
+      seleccionarGarzon(nuevo) {
+        seleccionar(nuevo);
+      },
+
+      async crearGarzon(nombre) {
+        const limpio = nombre.trim();
+        if (limpio.length < 2 || limpio.length > 40) {
+          avisar("El nombre debe tener entre 2 y 40 caracteres");
+          return null;
+        }
+        if (!MODO_COMPARTIDO) {
+          const existente = estadoRef.current.garzones.find(
+            (g) => g.nombre.toLowerCase() === limpio.toLowerCase()
+          );
+          if (existente) return existente;
+          const garzon: Garzon = {
+            id: `g-l-${Date.now()}`,
+            nombre: limpio,
+            activo: true,
+            rol: "GARZON",
+          };
+          auditarLocal({
+            usuarioId: garzonRef.current,
+            accion: "CREACION_USUARIO",
+            entidad: "garzones",
+            entidadId: garzon.id,
+            mesaNumero: null,
+            atencionId: null,
+            valorAnterior: null,
+            valorNuevo: { nombre: garzon.nombre, rol: garzon.rol },
+            observacion: "",
+          });
+          dispatch({ tipo: "APLICAR_GARZON", garzon });
+          return garzon;
+        }
+        if (sinConexion()) return null;
+        try {
+          const fila = await rpc<FilaGarzon>("crear_garzon", { p_nombre: limpio });
+          const garzon = mapGarzon(fila);
+          dispatch({ tipo: "APLICAR_GARZON", garzon });
+          return garzon;
+        } catch (e: unknown) {
+          avisar(e instanceof ErrorRpc ? e.message : "No se pudo crear el garzón");
+          return null;
+        }
+      },
+
+      async modificarGarzon(garzonId2, nombre, rol) {
+        const limpio = nombre.trim();
+        if (limpio.length < 2 || limpio.length > 40) {
+          avisar("El nombre debe tener entre 2 y 40 caracteres");
+          return false;
+        }
+        if (!MODO_COMPARTIDO) {
+          const garzon = estadoRef.current.garzones.find((g) => g.id === garzonId2);
+          if (!garzon) return false;
+          const duplicado = estadoRef.current.garzones.some(
+            (g) => g.id !== garzonId2 && g.nombre.toLowerCase() === limpio.toLowerCase()
+          );
+          if (duplicado) {
+            avisar("Ya existe un garzón con ese nombre");
+            return false;
+          }
+          auditarLocal({
+            usuarioId: garzonRef.current,
+            accion: "MODIFICACION_USUARIO",
+            entidad: "garzones",
+            entidadId: garzonId2,
+            mesaNumero: null,
+            atencionId: null,
+            valorAnterior: { nombre: garzon.nombre, rol: garzon.rol },
+            valorNuevo: { nombre: limpio, rol },
+            observacion: "",
+          });
+          dispatch({
+            tipo: "APLICAR_GARZON",
+            garzon: { ...garzon, nombre: limpio, rol },
+          });
+          return true;
+        }
+        if (sinConexion()) return false;
+        try {
+          const fila = await rpc<FilaGarzon>("modificar_garzon", {
+            p_garzon_id: garzonId2,
+            p_nombre: limpio,
+            p_rol: rol,
+          });
+          dispatch({ tipo: "APLICAR_GARZON", garzon: mapGarzon(fila) });
+          return true;
+        } catch (e: unknown) {
+          avisar(e instanceof ErrorRpc ? e.message : "No se pudo modificar el garzón");
+          return false;
+        }
+      },
+
+      async desactivarGarzon(garzonId2) {
+        if (!MODO_COMPARTIDO) {
+          const garzon = estadoRef.current.garzones.find((g) => g.id === garzonId2);
+          if (!garzon || !garzon.activo) return false;
+          auditarLocal({
+            usuarioId: garzonRef.current,
+            accion: "DESACTIVACION_USUARIO",
+            entidad: "garzones",
+            entidadId: garzonId2,
+            mesaNumero: null,
+            atencionId: null,
+            valorAnterior: { activo: true },
+            valorNuevo: { activo: false, nombre: garzon.nombre },
+            observacion: "",
+          });
+          dispatch({ tipo: "APLICAR_GARZON", garzon: { ...garzon, activo: false } });
+          if (garzonRef.current === garzonId2) seleccionar(null);
+          return true;
+        }
+        if (sinConexion()) return false;
+        try {
+          const fila = await rpc<FilaGarzon>("desactivar_garzon", {
+            p_garzon_id: garzonId2,
+          });
+          dispatch({ tipo: "APLICAR_GARZON", garzon: mapGarzon(fila) });
+          if (garzonRef.current === garzonId2) seleccionar(null);
+          return true;
+        } catch (e: unknown) {
+          avisar(e instanceof ErrorRpc ? e.message : "No se pudo desactivar el garzón");
+          return false;
+        }
+      },
+
+      async abrirAtencion(mesaId) {
+        const garzon = garzonRef.current;
+        if (!garzon) {
+          avisar("Selecciona primero qué garzón atiende");
+          return null;
+        }
+        if (!MODO_COMPARTIDO) {
+          const numeros = Object.values(estadoRef.current.atenciones).map(
+            (a) => a.numero
+          );
+          const numero = numeros.length ? Math.max(...numeros) + 1 : 1;
+          const atencion: Atencion = {
+            id: `a-${numero}`,
+            numero,
+            mesaId,
+            garzonId: garzon,
+            estado: "PENDIENTE",
+            fechaApertura: new Date().toISOString(),
+            fechaCierre: null,
+            menu: null,
+            totalMenu: 0,
+            totalConsumos: 0,
+            totalAbonos: 0,
+            saldoFinal: 0,
+            propinaPct: 0,
+            propinaMonto: 0,
+            totalFinal: 0,
+          };
+          const mesa = estadoRef.current.mesas.find((m) => m.id === mesaId);
+          if (!mesa || mesa.estado === "OCUPADA") return null;
+          auditarLocal({
+            usuarioId: garzon,
+            accion: "APERTURA_MESA",
+            entidad: "atenciones",
+            entidadId: atencion.id,
+            mesaNumero: mesa.numero,
+            atencionId: atencion.id,
+            valorAnterior: { estadoMesa: "DISPONIBLE" },
+            valorNuevo: { estadoMesa: "OCUPADA", atencion: numero },
+            observacion: "",
+          });
+          dispatch({ tipo: "ABRIR_ATENCION", atencion });
+          return atencion.id;
+        }
+        if (sinConexion()) return null;
+        try {
+          const atencion = await rpcAtencionMesa("abrir_atencion", { p_mesa_id: mesaId });
+          return atencion?.id ?? null;
+        } catch (e: unknown) {
+          avisar(e instanceof ErrorRpc ? e.message : "No se pudo abrir la atención");
+          void revalidarMesa(mesaId);
+          return null;
+        }
+      },
+
+      agregarProducto(atencionId, productoId) {
         const producto = getProducto(productoId);
-        optimista({ tipo: "AGREGAR_PRODUCTO", mesaId, productoId }, mesaId, () =>
-          rpc("agregar_consumo", {
-            p_mesa_id: mesaId,
-            p_producto_id: productoId,
-            p_precio_unitario: producto.precio,
-            p_delta: 1,
-          })
+        const atencion = estadoRef.current.atenciones[atencionId];
+        if (atencion?.estado === "PENDIENTE") {
+          const previo = estadoRef.current.consumos.find(
+            (c) => c.atencionId === atencionId && c.productoId === productoId
+          );
+          const cantidad = Math.min((previo?.cantidad ?? 0) + 1, 99);
+          if (!previo || cantidad !== previo.cantidad) {
+            auditarLocal({
+              usuarioId: garzonRef.current,
+              accion: previo ? "MODIFICAR_CANTIDAD" : "AGREGAR_PRODUCTO",
+              entidad: "consumos",
+              entidadId: previo?.id ?? `c-${atencionId}-${productoId}`,
+              mesaNumero: numeroDeMesa(atencion.mesaId),
+              atencionId,
+              valorAnterior: previo ? { cantidad: previo.cantidad } : null,
+              valorNuevo: previo
+                ? { producto: producto.nombre, cantidad }
+                : {
+                    producto: producto.nombre,
+                    cantidad: 1,
+                    precioUnitario: producto.precio,
+                  },
+              observacion: previo ? producto.nombre : "",
+            });
+          }
+        }
+        optimista(
+          { tipo: "AGREGAR_PRODUCTO", atencionId, productoId },
+          atencionId,
+          () =>
+            rpc("agregar_consumo", {
+              p_atencion_id: atencionId,
+              p_producto_id: productoId,
+              p_producto_nombre: producto.nombre,
+              p_precio_unitario: producto.precio,
+              p_delta: 1,
+            })
         );
       },
-      cambiarCantidad(mesaId, consumoId, delta) {
+
+      cambiarCantidad(atencionId, consumoId, delta) {
         const consumo = estadoRef.current.consumos.find((c) => c.id === consumoId);
         if (!consumo) return;
-        optimista({ tipo: "CAMBIAR_CANTIDAD", mesaId, consumoId, delta }, mesaId, () =>
-          rpc("agregar_consumo", {
-            p_mesa_id: mesaId,
-            p_producto_id: consumo.productoId,
-            p_precio_unitario: consumo.precioUnitario,
-            p_delta: delta,
-          })
+        const producto = getProducto(consumo.productoId);
+        const atencion = estadoRef.current.atenciones[atencionId];
+        if (atencion?.estado === "PENDIENTE") {
+          const cantidad = Math.min(Math.max(consumo.cantidad + delta, 1), 99);
+          if (cantidad !== consumo.cantidad) {
+            auditarLocal({
+              usuarioId: garzonRef.current,
+              accion: "MODIFICAR_CANTIDAD",
+              entidad: "consumos",
+              entidadId: consumoId,
+              mesaNumero: numeroDeMesa(atencion.mesaId),
+              atencionId,
+              valorAnterior: { cantidad: consumo.cantidad },
+              valorNuevo: { producto: producto.nombre, cantidad },
+              observacion: producto.nombre,
+            });
+          }
+        }
+        optimista(
+          { tipo: "CAMBIAR_CANTIDAD", atencionId, consumoId, delta },
+          atencionId,
+          () =>
+            rpc("agregar_consumo", {
+              p_atencion_id: atencionId,
+              p_producto_id: consumo.productoId,
+              p_producto_nombre: producto.nombre,
+              p_precio_unitario: consumo.precioUnitario,
+              p_delta: delta,
+            })
         );
       },
-      eliminarConsumo(mesaId, consumoId) {
+
+      eliminarConsumo(atencionId, consumoId) {
         const consumo = estadoRef.current.consumos.find((c) => c.id === consumoId);
         if (!consumo) return;
-        optimista({ tipo: "ELIMINAR_CONSUMO", mesaId, consumoId }, mesaId, () =>
-          rpc("eliminar_consumo", {
-            p_mesa_id: mesaId,
-            p_producto_id: consumo.productoId,
-          })
+        const producto = getProducto(consumo.productoId);
+        const atencion = estadoRef.current.atenciones[atencionId];
+        if (atencion?.estado === "PENDIENTE") {
+          auditarLocal({
+            usuarioId: garzonRef.current,
+            accion: "ELIMINAR_PRODUCTO",
+            entidad: "consumos",
+            entidadId: consumoId,
+            mesaNumero: numeroDeMesa(atencion.mesaId),
+            atencionId,
+            valorAnterior: {
+              producto: producto.nombre,
+              cantidad: consumo.cantidad,
+              subtotal: consumo.subtotal,
+            },
+            valorNuevo: null,
+            observacion: "",
+          });
+        }
+        optimista(
+          { tipo: "ELIMINAR_CONSUMO", atencionId, consumoId },
+          atencionId,
+          () =>
+            rpc("eliminar_consumo", {
+              p_atencion_id: atencionId,
+              p_producto_id: consumo.productoId,
+              p_producto_nombre: producto.nombre,
+            })
         );
       },
-      fijarMenu(mesaId, menu) {
-        optimista({ tipo: "FIJAR_MENU", mesaId, menu }, mesaId, () =>
+
+      fijarMenu(atencionId, menu) {
+        const atencion = estadoRef.current.atenciones[atencionId];
+        if (atencion?.estado === "PENDIENTE") {
+          auditarLocal({
+            usuarioId: garzonRef.current,
+            accion: "FIJAR_MENU",
+            entidad: "atenciones",
+            entidadId: atencionId,
+            mesaNumero: numeroDeMesa(atencion.mesaId),
+            atencionId,
+            valorAnterior: {
+              menu: atencion.menu?.menuId ?? null,
+              totalMenu: atencion.totalMenu,
+            },
+            valorNuevo: { menu: menu?.menuId ?? null, totalMenu: totalMenu(menu) },
+            observacion: "",
+          });
+        }
+        optimista({ tipo: "FIJAR_MENU", atencionId, menu }, atencionId, () =>
           rpc("fijar_menu", {
-            p_mesa_id: mesaId,
+            p_atencion_id: atencionId,
             p_menu_id: menu?.menuId ?? null,
             p_adultos: menu?.adultos ?? 0,
             p_ninos_6_11: menu?.ninos6a11 ?? 0,
             p_ninos_3_5: menu?.ninos3a5 ?? 0,
+            p_total_menu: totalMenu(menu),
           })
         );
       },
-      marcarPagada(mesaId) {
-        return conBloqueo(mesaId, { tipo: "MARCAR_PAGADA", mesaId }, "cerrar_mesa");
+
+      async agregarAbono(atencionId, monto, observacion) {
+        if (!Number.isFinite(monto) || monto <= 0) {
+          avisar("Ingresa un monto válido");
+          return false;
+        }
+        if (!MODO_COMPARTIDO) {
+          const atencion = estadoRef.current.atenciones[atencionId];
+          if (!atencion || atencion.estado !== "PENDIENTE") return false;
+          const abono: Abono = {
+            id: `ab-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+            atencionId,
+            monto: Math.round(monto),
+            observacion: observacion.trim().slice(0, 120),
+            garzonId: garzonRef.current,
+            creadoEn: new Date().toISOString(),
+          };
+          auditarLocal({
+            usuarioId: garzonRef.current,
+            accion: "REGISTRAR_ABONO",
+            entidad: "abonos",
+            entidadId: abono.id,
+            mesaNumero: numeroDeMesa(atencion.mesaId),
+            atencionId,
+            valorAnterior: null,
+            valorNuevo: { monto: abono.monto, observacion: abono.observacion },
+            observacion: abono.observacion,
+          });
+          dispatch({ tipo: "APLICAR_ABONO", abono });
+          return true;
+        }
+        if (sinConexion()) return false;
+        try {
+          const fila = await rpc<FilaAbono>("agregar_abono", {
+            p_atencion_id: atencionId,
+            p_monto: Math.round(monto),
+            p_observacion: observacion,
+          });
+          dispatch({ tipo: "APLICAR_ABONO", abono: mapAbono(fila) });
+          return true;
+        } catch (e: unknown) {
+          avisar(e instanceof ErrorRpc ? e.message : "No se pudo registrar el abono");
+          void revalidarAtencion(atencionId);
+          return false;
+        }
       },
-      async reabrirMesa(mesaId) {
-        await conBloqueo(mesaId, { tipo: "REABRIR", mesaId }, "reabrir_mesa");
+
+      async eliminarAbono(abonoId) {
+        const abono = estadoRef.current.abonos.find((a) => a.id === abonoId);
+        if (!abono) return;
+        if (!MODO_COMPARTIDO) {
+          const atencion = estadoRef.current.atenciones[abono.atencionId];
+          if (!atencion || atencion.estado !== "PENDIENTE") return;
+          auditarLocal({
+            usuarioId: garzonRef.current,
+            accion: "ELIMINAR_ABONO",
+            entidad: "abonos",
+            entidadId: abonoId,
+            mesaNumero: numeroDeMesa(atencion.mesaId),
+            atencionId: abono.atencionId,
+            valorAnterior: { monto: abono.monto, observacion: abono.observacion },
+            valorNuevo: null,
+            observacion: "",
+          });
+          dispatch({ tipo: "QUITAR_ABONO", abonoId });
+          return;
+        }
+        if (sinConexion()) return;
+        try {
+          await rpc("eliminar_abono", { p_abono_id: abonoId });
+          dispatch({ tipo: "QUITAR_ABONO", abonoId });
+        } catch (e: unknown) {
+          avisar(e instanceof ErrorRpc ? e.message : "No se pudo eliminar el abono");
+          void revalidarAtencion(abono.atencionId);
+        }
       },
-      async nuevaCuenta(mesaId) {
-        await conBloqueo(mesaId, { tipo: "NUEVA_CUENTA", mesaId }, "nueva_cuenta");
+
+      async cerrarAtencion(atencionId, propinaPct, propinaMonto) {
+        const pct = Math.max(0, Math.min(100, Math.round(propinaPct || 0)));
+        const propina = Math.max(0, Math.round(propinaMonto || 0));
+        if (!MODO_COMPARTIDO) {
+          const atencion = estadoRef.current.atenciones[atencionId];
+          if (atencion?.estado === "PENDIENTE") {
+            const total = totalCuenta(atencion);
+            auditarLocal({
+              usuarioId: garzonRef.current,
+              accion: "CIERRE_MESA",
+              entidad: "atenciones",
+              entidadId: atencionId,
+              mesaNumero: numeroDeMesa(atencion.mesaId),
+              atencionId,
+              valorAnterior: { estado: "PENDIENTE" },
+              valorNuevo: {
+                estado: "PAGADA",
+                total,
+                abonos: atencion.totalAbonos,
+                saldo: saldoPendiente(atencion),
+                propinaPct: pct,
+                propina,
+                totalFinal: total + propina,
+              },
+              observacion: propina > 0 ? "Con propina" : "Sin propina",
+            });
+          }
+          dispatch({
+            tipo: "CERRAR_ATENCION",
+            atencionId,
+            propinaPct: pct,
+            propinaMonto: propina,
+          });
+          return true;
+        }
+        if (sinConexion()) return false;
+        try {
+          await rpcAtencionMesa("cerrar_atencion", {
+            p_atencion_id: atencionId,
+            p_propina_pct: pct,
+            p_propina_monto: propina,
+          });
+          return true;
+        } catch (e: unknown) {
+          avisar(
+            e instanceof ErrorRpc ? e.message : "No se pudo cerrar la atención"
+          );
+          void revalidarAtencion(atencionId);
+          return false;
+        }
+      },
+
+      async reabrirAtencion(atencionId) {
+        if (!MODO_COMPARTIDO) {
+          // La reapertura es exclusiva de ADMIN.
+          const actor = estadoRef.current.garzones.find(
+            (g) => g.id === garzonRef.current
+          );
+          if (actor?.rol !== "ADMIN") {
+            avisar("Solo un ADMIN puede reabrir una cuenta");
+            return false;
+          }
+          const atencion = estadoRef.current.atenciones[atencionId];
+          const mesa = atencion
+            ? estadoRef.current.mesas.find((m) => m.id === atencion.mesaId)
+            : undefined;
+          const esUltima =
+            atencion &&
+            !Object.values(estadoRef.current.atenciones).some(
+              (a) => a.mesaId === atencion.mesaId && a.numero > atencion.numero
+            );
+          if (
+            atencion?.estado === "PAGADA" &&
+            mesa?.estado === "DISPONIBLE" &&
+            esUltima
+          ) {
+            auditarLocal({
+              usuarioId: garzonRef.current,
+              accion: "REAPERTURA_MESA",
+              entidad: "atenciones",
+              entidadId: atencionId,
+              mesaNumero: mesa.numero,
+              atencionId,
+              valorAnterior: { estado: "PAGADA" },
+              valorNuevo: { estado: "PENDIENTE" },
+              observacion: "",
+            });
+          }
+          dispatch({ tipo: "REABRIR_ATENCION", atencionId });
+          return true;
+        }
+        if (sinConexion()) return false;
+        try {
+          await rpcAtencionMesa("reabrir_atencion", { p_atencion_id: atencionId });
+          return true;
+        } catch (e: unknown) {
+          avisar(
+            e instanceof ErrorRpc ? e.message : "No se pudo reabrir la atención"
+          );
+          void revalidarAtencion(atencionId);
+          return false;
+        }
+      },
+
+      async transferirAtencion(atencionId, garzonNuevoId) {
+        if (!MODO_COMPARTIDO) {
+          const atencion = estadoRef.current.atenciones[atencionId];
+          if (!atencion || atencion.estado !== "PENDIENTE") return false;
+          if (atencion.garzonId === garzonNuevoId) return true;
+          const nombreDe = (id: string | null) =>
+            estadoRef.current.garzones.find((g) => g.id === id)?.nombre ?? "—";
+          auditarLocal({
+            usuarioId: garzonRef.current,
+            accion: "TRANSFERENCIA_MESA",
+            entidad: "atenciones",
+            entidadId: atencionId,
+            mesaNumero: numeroDeMesa(atencion.mesaId),
+            atencionId,
+            valorAnterior: { garzon: nombreDe(atencion.garzonId) },
+            valorNuevo: { garzon: nombreDe(garzonNuevoId) },
+            observacion: "",
+          });
+          dispatch({
+            tipo: "TRANSFERIR_ATENCION",
+            atencionId,
+            garzonId: garzonNuevoId,
+          });
+          return true;
+        }
+        if (sinConexion()) return false;
+        try {
+          const fila = await rpc<FilaAtencion>("transferir_atencion", {
+            p_atencion_id: atencionId,
+            p_garzon_nuevo_id: garzonNuevoId,
+          });
+          dispatch({ tipo: "APLICAR_ATENCION", atencion: mapAtencion(fila) });
+          avisar("Mesa transferida", "exito");
+          return true;
+        } catch (e: unknown) {
+          avisar(e instanceof ErrorRpc ? e.message : "No se pudo transferir la mesa");
+          void revalidarAtencion(atencionId);
+          return false;
+        }
+      },
+
+      registrarPrecuenta(atencionId) {
+        const atencion = estadoRef.current.atenciones[atencionId];
+        if (!atencion) return;
+        if (!MODO_COMPARTIDO) {
+          auditarLocal({
+            usuarioId: garzonRef.current,
+            accion: "GENERAR_PRECUENTA",
+            entidad: "atenciones",
+            entidadId: atencionId,
+            mesaNumero: numeroDeMesa(atencion.mesaId),
+            atencionId,
+            valorAnterior: null,
+            valorNuevo: {
+              total: totalCuenta(atencion),
+              abonos: atencion.totalAbonos,
+              saldo: saldoPendiente(atencion),
+            },
+            observacion: "",
+          });
+          return;
+        }
+        if (conexionRef.current === "online") {
+          void rpc("registrar_precuenta", {
+            p_atencion_id: atencionId,
+          }).catch(() => undefined);
+        }
+      },
+
+      async limpiarHistorial(desde, hasta) {
+        const actor = estadoRef.current.garzones.find(
+          (g) => g.id === garzonRef.current
+        );
+        if (actor?.rol !== "ADMIN") {
+          avisar("Solo un ADMIN puede limpiar el historial");
+          return null;
+        }
+        if (!MODO_COMPARTIDO) {
+          const enRango = (a: Atencion) => {
+            if (a.estado !== "PAGADA" || !a.fechaCierre) return false;
+            const t = new Date(a.fechaCierre).getTime();
+            return (
+              (!desde || t >= new Date(desde).getTime()) &&
+              (!hasta || t < new Date(hasta).getTime())
+            );
+          };
+          const cuentas = Object.values(estadoRef.current.atenciones).filter(
+            enRango
+          ).length;
+          auditarLocal({
+            usuarioId: garzonRef.current,
+            accion: "LIMPIAR_HISTORIAL",
+            entidad: "atenciones",
+            entidadId: null,
+            mesaNumero: null,
+            atencionId: null,
+            valorAnterior: null,
+            valorNuevo: { cuentas, desde, hasta },
+            observacion: cuentas === 1 ? "1 cuenta" : `${cuentas} cuentas`,
+          });
+          dispatch({ tipo: "LIMPIAR_HISTORIAL", desde, hasta });
+          return cuentas;
+        }
+        if (sinConexion()) return null;
+        try {
+          const n = await limpiarHistorialRemoto(desde, hasta);
+          // El historial se relee bajo demanda; quitamos las locales en rango.
+          dispatch({ tipo: "LIMPIAR_HISTORIAL", desde, hasta });
+          avisar(
+            n === 1 ? "1 cuenta eliminada del historial" : `${n} cuentas eliminadas`,
+            "exito"
+          );
+          return n;
+        } catch (e: unknown) {
+          avisar(
+            e instanceof ErrorRpc ? e.message : "No se pudo limpiar el historial"
+          );
+          return null;
+        }
+      },
+
+      /* ----------------- Autenticación (Supabase Auth) ------------------ */
+
+      async iniciarSesion(email, contrasena) {
+        if (!MODO_COMPARTIDO) return "La autenticación requiere Supabase";
+        const error = await authIniciarSesion(email, contrasena);
+        if (error) return error;
+        // INICIO_SESION queda en la auditoría con la identidad del JWT.
+        void rpc("registrar_sesion", { p_accion: "INICIO_SESION" }).catch(
+          () => undefined
+        );
+        return null;
+      },
+
+      async registrarse(nombre, email, contrasena, telefono) {
+        if (!MODO_COMPARTIDO) {
+          return { error: "El registro requiere Supabase", requiereConfirmacion: false };
+        }
+        const limpio = nombre.trim();
+        if (limpio.length < 2 || limpio.length > 40) {
+          return {
+            error: "El nombre debe tener entre 2 y 40 caracteres",
+            requiereConfirmacion: false,
+          };
+        }
+        const resultado = await authRegistrarse(limpio, email, contrasena, telefono);
+        if (!resultado.error && !resultado.requiereConfirmacion) {
+          // Quedó autenticado de inmediato: también es un inicio de sesión.
+          void rpc("registrar_sesion", { p_accion: "INICIO_SESION" }).catch(
+            () => undefined
+          );
+        }
+        return resultado;
+      },
+
+      async cerrarSesion() {
+        if (!MODO_COMPARTIDO) {
+          seleccionar(null);
+          return;
+        }
+        // CIERRE_SESION se audita ANTES de invalidar el token.
+        try {
+          await rpc("registrar_sesion", { p_accion: "CIERRE_SESION" });
+        } catch {
+          // sin conexión o sesión ya inválida: el logout sigue igual
+        }
+        await cerrarSesionAuth();
+      },
+
+      async recuperarContrasena(email) {
+        if (!MODO_COMPARTIDO) return "La recuperación requiere Supabase";
+        return authRecuperarContrasena(email);
+      },
+
+      async actualizarContrasena(nueva) {
+        if (!MODO_COMPARTIDO) return "La autenticación requiere Supabase";
+        if (nueva.length < 6) {
+          return "La contraseña debe tener al menos 6 caracteres";
+        }
+        const error = await authActualizarContrasena(nueva);
+        if (!error) {
+          setSesion((s) => ({ ...s, recuperando: false }));
+          avisar("Contraseña actualizada", "exito");
+        }
+        return error;
       },
     }),
-    [optimista, conBloqueo]
+    [
+      auditarLocal,
+      avisar,
+      numeroDeMesa,
+      optimista,
+      revalidarAtencion,
+      revalidarMesa,
+      rpcAtencionMesa,
+      seleccionar,
+      sinConexion,
+    ]
   );
 
   const valorAviso = useMemo(() => ({ aviso, cerrarAviso }), [aviso, cerrarAviso]);
+
+  const valorAuth = useMemo<EstadoAuth>(
+    () => ({
+      cargando: sesion.cargando,
+      userId: sesion.userId,
+      email: sesion.email,
+      recuperando: sesion.recuperando,
+      terminarRecuperacion() {
+        setSesion((s) => ({ ...s, recuperando: false }));
+      },
+    }),
+    [sesion]
+  );
 
   return (
     <CtxEstado.Provider value={estado}>
       <CtxAcciones.Provider value={acciones}>
         <CtxConexion.Provider value={conexion}>
-          <CtxAviso.Provider value={valorAviso}>{children}</CtxAviso.Provider>
+          <CtxGarzon.Provider value={garzonId}>
+            <CtxAuth.Provider value={valorAuth}>
+              <CtxRevalidar.Provider value={revalidarAtencion}>
+                <CtxAviso.Provider value={valorAviso}>{children}</CtxAviso.Provider>
+              </CtxRevalidar.Provider>
+            </CtxAuth.Provider>
+          </CtxGarzon.Provider>
         </CtxConexion.Provider>
       </CtxAcciones.Provider>
     </CtxEstado.Provider>
@@ -510,15 +1602,221 @@ export function useConexion(): EstadoConexion {
   return useContext(CtxConexion);
 }
 
+/** Sesión del mesero (modo compartido). En modo local, userId es null. */
+export function useAuth(): EstadoAuth {
+  const ctx = useContext(CtxAuth);
+  if (!ctx) throw new Error("useAuth requiere <ProveedorApp>");
+  return ctx;
+}
+
 export function useAviso() {
   const ctx = useContext(CtxAviso);
   if (!ctx) throw new Error("useAviso requiere <ProveedorApp>");
   return ctx;
 }
 
-export function useMesa(mesaId: string): { mesa: Mesa; consumos: ConsumoMesa[] } {
-  const { mesas, consumos } = useEstadoApp();
+/** Garzón que opera este dispositivo (null si aún no se elige). */
+export function useGarzonActual(): { garzonId: string | null; garzon: Garzon | null } {
+  const garzonId = useContext(CtxGarzon);
+  const { garzones } = useEstadoApp();
+  return {
+    garzonId,
+    garzon: garzones.find((g) => g.id === garzonId) ?? null,
+  };
+}
+
+export function useGarzon(garzonId: string | null): Garzon | null {
+  const { garzones } = useEstadoApp();
+  if (!garzonId) return null;
+  return garzones.find((g) => g.id === garzonId) ?? null;
+}
+
+/** Mesa + su atención abierta (si la tiene) con consumos y abonos. */
+export function useMesa(mesaId: string): {
+  mesa: Mesa;
+  atencion: Atencion | null;
+  consumos: Consumo[];
+  abonos: Abono[];
+} {
+  const { mesas, atenciones, consumos, abonos } = useEstadoApp();
   const mesa = mesas.find((m) => m.id === mesaId);
   if (!mesa) throw new Error(`Mesa desconocida: ${mesaId}`);
-  return { mesa, consumos: consumosDeMesa(consumos, mesaId) };
+  const atencion = mesa.atencionActualId
+    ? atenciones[mesa.atencionActualId] ?? null
+    : null;
+  return {
+    mesa,
+    atencion,
+    consumos: atencion ? consumosDe(consumos, atencion.id) : [],
+    abonos: atencion ? abonosDe(abonos, atencion.id) : [],
+  };
+}
+
+/**
+ * Una atención cualquiera (abierta o histórica) con su detalle. En modo
+ * compartido trae del servidor lo que falte (atención vieja o detalle
+ * de una cerrada que no está en memoria).
+ */
+export function useDetalleAtencion(atencionId: string): {
+  atencion: Atencion | null;
+  consumos: Consumo[];
+  abonos: Abono[];
+  cargando: boolean;
+} {
+  const estado = useEstadoApp();
+  const atencion = estado.atenciones[atencionId] ?? null;
+  const consumos = consumosDe(estado.consumos, atencionId);
+  const abonos = abonosDe(estado.abonos, atencionId);
+
+  const revalidar = useContext(CtxRevalidar);
+  const faltaDetalle =
+    MODO_COMPARTIDO &&
+    (!atencion ||
+      (atencion.estado === "PAGADA" &&
+        ((atencion.totalConsumos > 0 && consumos.length === 0) ||
+          (atencion.totalAbonos > 0 && abonos.length === 0))));
+  const [cargando, setCargando] = useState(faltaDetalle);
+  const pedidaRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!faltaDetalle || !revalidar || pedidaRef.current === atencionId) return;
+    pedidaRef.current = atencionId;
+    setCargando(true);
+    void revalidar(atencionId).finally(() => setCargando(false));
+  }, [atencionId, faltaDetalle, revalidar]);
+
+  return { atencion, consumos, abonos, cargando };
+}
+
+/** Historial de atenciones PAGADAS (global o de una mesa), más recientes
+ *  primero. Nunca se consulta el estado actual de las mesas. */
+export function useHistorial(
+  mesaId?: string,
+  limite = 100,
+  version = 0
+): { atenciones: Atencion[]; cargando: boolean } {
+  const estado = useEstadoApp();
+  const [remotas, setRemotas] = useState<Atencion[]>([]);
+  const [cargando, setCargando] = useState(MODO_COMPARTIDO);
+
+  useEffect(() => {
+    if (!MODO_COMPARTIDO) return;
+    let activo = true;
+    setCargando(true);
+    consultarHistorial(mesaId, limite)
+      .then((filas) => {
+        if (activo) setRemotas(filas);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (activo) setCargando(false);
+      });
+    return () => {
+      activo = false;
+    };
+  }, [mesaId, limite, version]);
+
+  const atenciones = useMemo(() => {
+    const porId = new Map<string, Atencion>();
+    for (const a of remotas) porId.set(a.id, a);
+    // Las cerradas en vivo (Realtime o este dispositivo) pisan/expanden
+    // la consulta inicial.
+    for (const a of Object.values(estado.atenciones)) {
+      if (a.estado !== "PAGADA") {
+        porId.delete(a.id); // reabierta: sale del historial
+        continue;
+      }
+      if (mesaId && a.mesaId !== mesaId) continue;
+      porId.set(a.id, a);
+    }
+    return [...porId.values()]
+      .sort((a, b) => (b.fechaCierre ?? "").localeCompare(a.fechaCierre ?? ""))
+      .slice(0, limite);
+  }, [remotas, estado.atenciones, mesaId, limite]);
+
+  return { atenciones, cargando };
+}
+
+export interface ResumenPropinas {
+  filas: FilaDashboard[];
+  totalPropinas: number;
+  totalVentas: number;
+  cuentas: number;
+  /** Propina promedio por cuenta cobrada. */
+  promedioPropina: number;
+}
+
+/**
+ * Dashboard de propinas (solo ADMIN): total, promedio y ranking por
+ * garzón. En modo compartido lo agrega el servidor; en local se calcula
+ * desde las atenciones PAGADAS. `version` fuerza recarga manual.
+ */
+export function useDashboard(
+  desde: string | null,
+  hasta: string | null,
+  version = 0
+): { resumen: ResumenPropinas; cargando: boolean } {
+  const estado = useEstadoApp();
+  const [filasRemotas, setFilasRemotas] = useState<FilaDashboard[]>([]);
+  const [cargando, setCargando] = useState(MODO_COMPARTIDO);
+
+  useEffect(() => {
+    if (!MODO_COMPARTIDO) return;
+    let activo = true;
+    setCargando(true);
+    dashboardPropinas(desde, hasta)
+      .then((filas) => {
+        if (activo) setFilasRemotas(filas);
+      })
+      .catch(() => {
+        if (activo) setFilasRemotas([]);
+      })
+      .finally(() => {
+        if (activo) setCargando(false);
+      });
+    return () => {
+      activo = false;
+    };
+  }, [desde, hasta, version]);
+
+  const resumen = useMemo<ResumenPropinas>(() => {
+    let filas: FilaDashboard[];
+    if (MODO_COMPARTIDO) {
+      filas = filasRemotas;
+    } else {
+      const d = desde ? new Date(desde).getTime() : -Infinity;
+      const h = hasta ? new Date(hasta).getTime() : Infinity;
+      const porGarzon = new Map<string, FilaDashboard>();
+      for (const a of Object.values(estado.atenciones)) {
+        if (a.estado !== "PAGADA" || !a.fechaCierre) continue;
+        const t = new Date(a.fechaCierre).getTime();
+        if (t < d || t >= h) continue;
+        const id = a.garzonId ?? "—";
+        const nombre =
+          estado.garzones.find((g) => g.id === a.garzonId)?.nombre ?? "—";
+        const fila =
+          porGarzon.get(id) ??
+          { garzonId: a.garzonId, nombre, cuentas: 0, totalPropinas: 0, totalVentas: 0 };
+        fila.cuentas += 1;
+        fila.totalPropinas += a.propinaMonto;
+        fila.totalVentas += a.totalMenu + a.totalConsumos;
+        porGarzon.set(id, fila);
+      }
+      filas = [...porGarzon.values()].sort(
+        (x, y) => y.totalPropinas - x.totalPropinas || y.cuentas - x.cuentas
+      );
+    }
+    const totalPropinas = filas.reduce((s, f) => s + f.totalPropinas, 0);
+    const totalVentas = filas.reduce((s, f) => s + f.totalVentas, 0);
+    const cuentas = filas.reduce((s, f) => s + f.cuentas, 0);
+    return {
+      filas,
+      totalPropinas,
+      totalVentas,
+      cuentas,
+      promedioPropina: cuentas > 0 ? Math.round(totalPropinas / cuentas) : 0,
+    };
+  }, [filasRemotas, estado.atenciones, estado.garzones, desde, hasta]);
+
+  return { resumen, cargando };
 }
