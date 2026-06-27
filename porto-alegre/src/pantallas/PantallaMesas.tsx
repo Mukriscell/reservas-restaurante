@@ -1,6 +1,7 @@
 import { Martini } from "lucide-react";
 import { useEstadoApp } from "../estado/contexto";
 import { TarjetaMesa } from "../componentes/TarjetaMesa";
+import { ResumenTurno } from "../componentes/ResumenTurno";
 import { PillConexion } from "../componentes/Conexion";
 import { BotonTema } from "../componentes/BotonTema";
 
@@ -16,9 +17,9 @@ export function PantallaMesas({
 
   return (
     <div className="mx-auto max-w-5xl px-3 pb-10">
-      <header className="sticky top-0 z-20 -mx-3 mb-4 border-b border-zinc-200/80 bg-zinc-100/95 px-3 py-3 backdrop-blur dark:border-white/10 dark:bg-azul-950/95">
+      <header className="barra-sup -mx-3 mb-4 px-3 py-3">
         <div className="flex items-center gap-3">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-verde-600 text-white shadow-suave">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-verde-600 text-white shadow-realce">
             <Martini className="h-6 w-6" />
           </span>
           <div className="min-w-0 flex-1">
@@ -35,6 +36,11 @@ export function PantallaMesas({
           <PillConexion />
           <BotonTema />
         </div>
+
+        <div className="mt-3">
+          <ResumenTurno mesas={mesas} />
+        </div>
+
         <p className="mt-3 flex gap-4 text-xs font-medium text-zinc-500 dark:text-zinc-400">
           <span className="flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 rounded-full bg-amarillo-400" />
@@ -45,8 +51,8 @@ export function PantallaMesas({
             Pagada
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-full bg-azul-700 dark:bg-azul-400" />
-            Seleccionada
+            <span className="h-2.5 w-2.5 rounded-full bg-zinc-300 dark:bg-white/20" />
+            Libre
           </span>
         </p>
       </header>

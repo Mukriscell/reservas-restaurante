@@ -70,12 +70,12 @@ export function PantallaMesa({
 
   return (
     <div className="mx-auto max-w-4xl px-3 pb-10">
-      <header className="sticky top-0 z-20 -mx-3 mb-4 border-b border-zinc-200/80 bg-zinc-100/95 px-3 py-3 backdrop-blur dark:border-white/10 dark:bg-azul-950/95">
+      <header className="barra-sup -mx-3 mb-4 px-3 py-3">
         <div className="flex items-center gap-2.5">
           <button
             onClick={onVolver}
             aria-label="Volver a las mesas"
-            className="btn btn-borde h-12 w-12 !px-0"
+            className="btn btn-borde btn-icono"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
@@ -83,41 +83,41 @@ export function PantallaMesa({
             Mesa {mesa.numeroMesa}
           </h1>
           <span className={`pill ${pagada ? "pill-pagada" : "pill-pendiente"}`}>
-            {mesa.estado}
+            {pagada ? "Pagada" : "Pendiente"}
           </span>
           <span className="flex-1" />
           <PillConexion />
         </div>
 
-        <div className="mt-3 flex items-center justify-between gap-2.5">
+        <div className="mt-3 flex items-end justify-between gap-2.5 rounded-2xl bg-azul-950 px-4 py-3 text-white dark:bg-white/[0.04]">
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-white/60">
               Total acumulado
             </p>
             <p
               data-testid="total-mesa"
-              className="text-3xl font-black leading-tight text-verde-700 dark:text-amarillo-400"
+              className="text-3xl font-black leading-tight tabular text-amarillo-400"
             >
               {formatCLP(mesa.total)}
             </p>
           </div>
           <div className="flex shrink-0 gap-2">
-            <button onClick={onVerDesglose} className="btn btn-borde">
+            <button
+              onClick={onVerDesglose}
+              className="btn border border-white/15 bg-white/10 text-white hover:bg-white/20"
+            >
               <Receipt className="h-4 w-4" /> Desglose
             </button>
             {!pagada && (
-              <button
-                onClick={() => setConfirmando("pagar")}
-                className="btn btn-verde"
-              >
-                <CheckCircle2 className="h-4 w-4" /> Cobrar mesa
+              <button onClick={() => setConfirmando("pagar")} className="btn btn-verde">
+                <CheckCircle2 className="h-4 w-4" /> Cobrar
               </button>
             )}
           </div>
         </div>
 
         {confirmando === "pagar" && !pagada && (
-          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl border border-verde-300 bg-verde-50 p-3 dark:border-verde-500/30 dark:bg-verde-500/10">
+          <div className="mt-3 flex animate-subir flex-wrap items-center gap-2 rounded-2xl border border-verde-300 bg-verde-50 p-3 dark:border-verde-500/30 dark:bg-verde-500/10">
             <span className="flex-1 text-sm font-semibold text-verde-900 dark:text-verde-200">
               ¿Cobrar la mesa {mesa.numeroMesa} por {formatCLP(mesa.total)}?
             </span>
@@ -150,7 +150,7 @@ export function PantallaMesa({
 
       {/* Indicador de cierre y acciones sobre una mesa pagada */}
       {pagada && (
-        <div className="tarjeta mb-4 border-verde-300 p-4 dark:border-verde-500/30">
+        <div className="tarjeta mb-4 animate-subir border-verde-300 p-4 dark:border-verde-500/30">
           <p className="flex items-center gap-2 text-sm font-bold text-verde-800 dark:text-verde-300">
             <Lock className="h-4 w-4" /> Mesa pagada: la cuenta quedó cerrada y
             no se puede modificar.
@@ -198,7 +198,7 @@ export function PantallaMesa({
             <h2 className="mb-2 text-sm font-bold text-verde-700 dark:text-verde-400">
               Carta
             </h2>
-            <div className="max-h-[46vh] overflow-y-auto pr-1 lg:max-h-[62vh]">
+            <div className="scroll-fino max-h-[46vh] overflow-y-auto pr-1 lg:max-h-[62vh]">
               {resultados.length === 0 ? (
                 <p className="py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
                   Sin resultados para “{consulta}”.
@@ -211,7 +211,7 @@ export function PantallaMesa({
                   if (delGrupo.length === 0) return null;
                   return (
                     <div key={categoria}>
-                      <p className="sticky top-0 bg-white py-1.5 text-[11px] font-black uppercase tracking-[0.15em] text-zinc-400 dark:bg-[#1b2342] dark:text-zinc-500">
+                      <p className="rotulo-seccion sticky top-0 bg-white py-1.5 dark:bg-[#161e3a]">
                         {categoria}
                       </p>
                       <ul>
@@ -223,20 +223,20 @@ export function PantallaMesa({
                                 onClick={() =>
                                   acciones.agregarProducto(mesaId, p.id)
                                 }
-                                className="flex min-h-12 w-full items-center gap-2 rounded-xl px-2 py-2.5 text-left transition hover:bg-zinc-100 active:bg-zinc-200 dark:hover:bg-white/10 dark:active:bg-white/15"
+                                className="group flex min-h-12 w-full items-center gap-2 rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-zinc-100 active:bg-zinc-200 dark:hover:bg-white/10 dark:active:bg-white/15"
                               >
                                 <span className="min-w-0 flex-1 truncate text-sm font-medium">
                                   {p.nombre}
                                   {cantidad && (
-                                    <span className="ml-2 rounded-full bg-azul-700 px-2 py-0.5 text-xs font-bold text-white dark:bg-azul-500">
+                                    <span className="ml-2 rounded-full bg-azul-600 px-2 py-0.5 text-xs font-bold text-white dark:bg-azul-500">
                                       ×{cantidad}
                                     </span>
                                   )}
                                 </span>
-                                <span className="text-sm font-semibold text-zinc-500 dark:text-zinc-400">
+                                <span className="text-sm font-semibold tabular text-zinc-500 dark:text-zinc-400">
                                   {formatCLP(p.precio)}
                                 </span>
-                                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-verde-600/10 text-verde-700 dark:bg-verde-500/15 dark:text-verde-400">
+                                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-verde-600/10 text-verde-700 transition-colors group-hover:bg-verde-600/20 dark:bg-verde-500/15 dark:text-verde-400">
                                   <Plus className="h-4 w-4" />
                                 </span>
                               </button>
