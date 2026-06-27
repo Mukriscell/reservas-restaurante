@@ -117,7 +117,7 @@ export function SelectorGarzon({
           )}
         </div>
 
-        <ul className="mt-4 max-h-[45vh] space-y-2 overflow-y-auto pr-1">
+        <ul className="scroll-fino mt-4 max-h-[45vh] space-y-2 overflow-y-auto pr-1">
           {activos.map((g) =>
             editandoId === g.id ? (
               <li

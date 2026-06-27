@@ -115,7 +115,7 @@ export function PantallaMesas({
 
   return (
     <div className="mx-auto max-w-6xl px-3 pb-10">
-      <header className="sticky top-0 z-20 -mx-3 mb-4 border-b border-zinc-200/80 bg-zinc-100/95 px-3 py-3 backdrop-blur dark:border-white/10 dark:bg-azul-950/95">
+      <header className="barra-sup -mx-3 mb-4 px-3 py-3">
         <div className="flex items-center gap-3">
           <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-verde-600 text-white shadow-suave">
             <Martini className="h-6 w-6" />
