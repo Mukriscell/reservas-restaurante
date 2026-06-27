@@ -65,7 +65,7 @@ en 20 rondas de doble cierre simultáneo siempre ganó exactamente uno.
 ```
 porto-alegre/
   index.html                  → shell + manifest + tema sin parpadeo
-  railway.json                → build/arranque para Railway
+  vercel.json                 → configuración de despliegue en Vercel
   supabase/migrations/
     0001_esquema.sql          → tablas, RLS, RPCs transaccionales, seed, Realtime
   public/
@@ -150,7 +150,7 @@ pnpm install
 cp .env.example .env   # opcional: credenciales de Supabase (modo compartido)
 pnpm dev               # desarrollo → http://localhost:5173
 pnpm build             # typecheck + bundle de producción en dist/
-pnpm start             # sirve dist/ (igual que en Railway)
+pnpm preview           # previsualiza el build de dist/ en local
 ```
 
 ## 8. Instalar en el celular (PWA)
@@ -160,16 +160,28 @@ Con la app desplegada (HTTPS), abre la URL en el teléfono:
 - **Android (Chrome)**: menú ⋮ → *Agregar a la pantalla principal* → *Instalar*.
 - **iPhone (Safari)**: *Compartir* → *Agregar a pantalla de inicio*.
 
-## 9. Desplegar en Railway (proyecto `observant-emotion`)
+## 9. Desplegar en Vercel
 
-1. En [railway.com](https://railway.com), proyecto **observant-emotion** →
-   **+ Create → GitHub Repo** → `Mukriscell/reservas-restaurante` (rama `main`).
-2. En el servicio: **Settings → Source → Root Directory** = `porto-alegre`.
-3. **Variables** → agrega `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY`
-   (sin ellas queda en modo local, sin sincronización entre garzones).
-4. **Settings → Networking → Generate Domain** → URL para los celulares.
+La app es un sitio **estático** (Vite → `dist/`); Vercel la construye y la
+sirve por CDN con HTTPS. La configuración vive en
+[`vercel.json`](vercel.json).
 
-Cada `git push` a `main` re-despliega automáticamente.
+1. En [vercel.com](https://vercel.com) → **Add New… → Project** → importa
+   `Mukriscell/reservas-restaurante`.
+2. **Root Directory** = `porto-alegre` (es un monorepo; este es el subproyecto).
+   Framework *Vite* se detecta solo; build `pnpm build`, salida `dist`.
+3. **Environment Variables** → agrega `VITE_SUPABASE_URL` y
+   `VITE_SUPABASE_ANON_KEY`. Son **de build** (Vite las incrusta al compilar),
+   así que deben estar antes del deploy; sin ellas la app queda en modo local,
+   sin sincronización entre garzones.
+4. **Deploy**. Vercel entrega un dominio `*.vercel.app` para los celulares.
+
+Cada `git push` a `main` re-despliega automáticamente; cada PR genera un
+*Preview Deployment* con su propia URL.
+
+> Si cambias las variables de Supabase después, hay que **redeploy** para que
+> el nuevo valor entre al bundle (no basta con guardar la variable).
+
 
 ## 10. Decisiones técnicas
 
@@ -187,7 +199,7 @@ Cada `git push` a `main` re-despliega automáticamente.
   un momento antes que inventar una cola offline que pueda divergir.
 - **Sin dependencias extra**: estado con Context + useReducer, navegación
   por estado, avisos propios; `@supabase/supabase-js` es la única adición
-  (exigida por el requisito) y `serve` para servir estáticos.
+  (exigida por el requisito); el bundle estático lo sirve Vercel por CDN.
 - **Paleta con escalas completas** (`verde`, `amarillo`, `azul` en Tailwind)
   y clases componibles (`tarjeta`, `btn`, `pill`) para mantener consistencia
   visual en ambos temas sin duplicar estilos.
