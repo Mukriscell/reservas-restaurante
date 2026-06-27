@@ -10,6 +10,7 @@ import {
 import { useAcciones, useEstadoApp, useGarzonActual } from "../estado/contexto";
 import { MODO_COMPARTIDO } from "../sync/supabase";
 import { TarjetaMesa } from "../componentes/TarjetaMesa";
+import { ResumenTurno } from "../componentes/ResumenTurno";
 import { PillConexion } from "../componentes/Conexion";
 import { BotonTema } from "../componentes/BotonTema";
 import {
@@ -162,6 +163,8 @@ export function PantallaMesas({
             </button>
           )}
         </div>
+
+        <ResumenTurno atenciones={atenciones} />
 
         {/* Filtros / leyenda por estado del plano */}
         <div className="-mx-1 mt-3 flex items-center gap-1.5 overflow-x-auto px-1 pb-1">

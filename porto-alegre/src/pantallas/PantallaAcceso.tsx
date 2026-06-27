@@ -12,8 +12,7 @@ import { BotonTema } from "../componentes/BotonTema";
 
 type Modo = "login" | "registro" | "recuperar" | "nueva";
 
-const CAMPO =
-  "min-h-12 w-full rounded-xl border border-zinc-300 bg-white px-3 text-sm outline-none focus:border-verde-600 dark:border-white/15 dark:bg-white/5";
+const CAMPO = "input";
 
 function Campo({
   etiqueta,
@@ -93,8 +92,12 @@ export function PantallaAcceso({ modoInicial = "login" }: { modoInicial?: Modo }
   }
 
   return (
-    <div className="flex min-h-dvh items-center justify-center px-3 py-8">
-      <div className="w-full max-w-sm">
+    <div className="relative flex min-h-dvh items-center justify-center overflow-hidden px-3 py-8">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute left-1/2 top-1/3 h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full bg-verde-500/10 blur-3xl dark:bg-verde-500/15"
+      />
+      <div className="relative w-full max-w-sm">
         <div className="mb-5 flex items-center justify-center gap-3">
           <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-verde-600 text-white shadow-suave">
             <Martini className="h-7 w-7" />
@@ -111,7 +114,7 @@ export function PantallaAcceso({ modoInicial = "login" }: { modoInicial?: Modo }
           <BotonTema />
         </div>
 
-        <form onSubmit={(e) => void enviar(e)} className="tarjeta space-y-3 p-5">
+        <form onSubmit={(e) => void enviar(e)} className="tarjeta animate-subir space-y-3 p-5">
           <h2 className="flex items-center gap-2 text-lg font-black tracking-tight">
             {modo === "login" && (
               <>
