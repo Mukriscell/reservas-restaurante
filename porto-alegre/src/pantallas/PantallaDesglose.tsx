@@ -27,12 +27,12 @@ export function PantallaDesglose({
 
   return (
     <div className="mx-auto max-w-xl px-3 pb-10">
-      <header className="sticky top-0 z-20 -mx-3 mb-4 border-b border-zinc-200/80 bg-zinc-100/95 px-3 py-3 backdrop-blur dark:border-white/10 dark:bg-azul-950/95">
+      <header className="barra-sup -mx-3 mb-4 px-3 py-3">
         <div className="flex items-center gap-2.5">
           <button
             onClick={onVolver}
             aria-label="Volver a la mesa"
-            className="btn btn-borde h-12 w-12 !px-0"
+            className="btn btn-borde btn-icono"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
@@ -41,12 +41,12 @@ export function PantallaDesglose({
             Desglose · Mesa {mesa.numeroMesa}
           </h1>
           <span className={`pill ${pagada ? "pill-pagada" : "pill-pendiente"}`}>
-            {mesa.estado}
+            {pagada ? "Pagada" : "Pendiente"}
           </span>
         </div>
       </header>
 
-      <div className="tarjeta p-5">
+      <div className="tarjeta animate-subir p-5">
         {mesa.fechaApertura && (
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
             Abierta: {formatFechaHora(mesa.fechaApertura)}
@@ -57,7 +57,7 @@ export function PantallaDesglose({
         {/* Menú buffet */}
         {mesa.menu && (
           <section className="mt-4">
-            <h2 className="text-[11px] font-black uppercase tracking-[0.15em] text-zinc-400 dark:text-zinc-500">
+            <h2 className="rotulo-seccion">
               Menú · {getMenuBuffet(mesa.menu.menuId).nombre} · {personas}{" "}
               {personas === 1 ? "persona" : "personas"}
             </h2>
@@ -65,22 +65,20 @@ export function PantallaDesglose({
               {lineasMenu.map((l) => (
                 <li key={l.texto} className="flex justify-between gap-3 text-sm">
                   <span className="text-zinc-600 dark:text-zinc-300">{l.texto}</span>
-                  <span className="font-semibold">{formatCLP(l.monto)}</span>
+                  <span className="font-semibold tabular">{formatCLP(l.monto)}</span>
                 </li>
               ))}
             </ul>
             <p className="mt-2 flex justify-between border-t border-zinc-200 pt-2 text-sm dark:border-white/10">
               <span className="text-zinc-500 dark:text-zinc-400">Subtotal menú</span>
-              <span className="font-bold">{formatCLP(subtotalMenu)}</span>
+              <span className="font-bold tabular">{formatCLP(subtotalMenu)}</span>
             </p>
           </section>
         )}
 
         {/* Consumos */}
         <section className="mt-4">
-          <h2 className="text-[11px] font-black uppercase tracking-[0.15em] text-zinc-400 dark:text-zinc-500">
-            Consumos
-          </h2>
+          <h2 className="rotulo-seccion">Consumos</h2>
           {consumos.length === 0 ? (
             <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
               Sin consumos.
@@ -96,7 +94,7 @@ export function PantallaDesglose({
                         ({formatCLP(c.precioUnitario)} c/u)
                       </span>
                     </span>
-                    <span className="font-semibold">{formatCLP(c.subtotal)}</span>
+                    <span className="font-semibold tabular">{formatCLP(c.subtotal)}</span>
                   </li>
                 ))}
               </ul>
@@ -104,17 +102,17 @@ export function PantallaDesglose({
                 <span className="text-zinc-500 dark:text-zinc-400">
                   Subtotal consumos
                 </span>
-                <span className="font-bold">{formatCLP(subtotalConsumos)}</span>
+                <span className="font-bold tabular">{formatCLP(subtotalConsumos)}</span>
               </p>
             </>
           )}
         </section>
 
-        <p className="mt-5 flex items-baseline justify-between rounded-xl bg-azul-950 px-4 py-3 text-white dark:bg-azul-900">
+        <p className="mt-5 flex items-baseline justify-between rounded-xl bg-azul-950 px-4 py-3 text-white dark:bg-white/[0.06]">
           <span className="text-sm font-black uppercase tracking-[0.15em]">
             Total
           </span>
-          <span className="text-2xl font-black text-amarillo-400">
+          <span className="text-2xl font-black tabular text-amarillo-400">
             {formatCLP(mesa.total)}
           </span>
         </p>

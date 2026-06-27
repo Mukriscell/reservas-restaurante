@@ -18,7 +18,7 @@ export function Aviso() {
     <div className="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4">
       <div
         role="status"
-        className="pointer-events-auto flex max-w-md items-center gap-3 rounded-2xl bg-azul-900 px-4 py-3 text-sm font-medium text-white shadow-lg dark:bg-azul-800"
+        className="pointer-events-auto flex max-w-md animate-subir items-center gap-3 rounded-2xl bg-azul-900 px-4 py-3 text-sm font-medium text-white shadow-lg dark:bg-azul-800"
       >
         {aviso.tono === "error" ? (
           <TriangleAlert className="h-5 w-5 shrink-0 text-amarillo-400" />

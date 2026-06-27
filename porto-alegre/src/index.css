@@ -4,41 +4,85 @@
 
 @layer base {
   body {
-    @apply bg-zinc-100 text-zinc-900 antialiased dark:bg-azul-950 dark:text-zinc-100;
+    @apply bg-zinc-50 text-zinc-900 antialiased dark:bg-azul-950 dark:text-zinc-100;
+  }
+
+  /* Tipografía con números tabulares: montos alineados en columnas. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Scrollbar discreta y acorde al tema (carta y listas largas). */
+  .scroll-fino {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(161 161 170 / 0.4) transparent;
+  }
+  .scroll-fino::-webkit-scrollbar {
+    width: 6px;
+  }
+  .scroll-fino::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-zinc-300 dark:bg-white/15;
   }
 }
 
 @layer components {
-  /* Tarjetas: bordes redondeados y sombras suaves en ambos temas. */
+  /* Tarjeta base: superficie elevada en ambos temas. */
   .tarjeta {
-    @apply rounded-2xl border border-zinc-200/80 bg-white shadow-suave dark:border-white/10 dark:bg-white/5;
+    @apply rounded-2xl border border-zinc-200/70 bg-white shadow-suave dark:border-white/10 dark:bg-white/[0.04];
   }
 
-  /* Botones grandes, aptos para uso táctil (mínimo 48px de alto). */
+  /* Encabezado pegajoso reutilizable (mismas reglas en las 3 pantallas). */
+  .barra-sup {
+    @apply sticky top-0 z-20 border-b border-zinc-200/70 bg-zinc-50/85 backdrop-blur-lg dark:border-white/10 dark:bg-azul-950/85;
+  }
+
+  /* Botones grandes, táctiles (mínimo 48px de alto). */
   .btn {
-    @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50;
+    @apply inline-flex min-h-12 select-none items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition-all duration-150 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50;
   }
   .btn-verde {
-    @apply bg-verde-600 text-white hover:bg-verde-700;
+    @apply bg-verde-600 text-white shadow-suave hover:bg-verde-700 hover:shadow-realce;
   }
   .btn-borde {
-    @apply border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-white/15 dark:bg-transparent dark:text-zinc-200 dark:hover:bg-white/10;
+    @apply border border-zinc-300 bg-white text-zinc-700 hover:border-zinc-400 hover:bg-zinc-50 dark:border-white/15 dark:bg-white/[0.03] dark:text-zinc-200 dark:hover:bg-white/10;
+  }
+  .btn-amarillo {
+    @apply bg-amarillo-400 text-amarillo-950 hover:bg-amarillo-300;
   }
   .btn-peligro {
     @apply bg-red-600 text-white hover:bg-red-700;
   }
+  .btn-icono {
+    @apply h-12 w-12 !px-0;
+  }
 
   .input {
-    @apply w-full rounded-xl border border-zinc-300 bg-white px-3 py-3 text-base text-zinc-900 placeholder:text-zinc-400 focus:border-verde-600 focus:outline-none focus:ring-2 focus:ring-verde-600/25 dark:border-white/15 dark:bg-white/5 dark:text-zinc-100 dark:placeholder:text-zinc-500;
+    @apply w-full rounded-xl border border-zinc-300 bg-white px-3 py-3 text-base text-zinc-900 transition-colors placeholder:text-zinc-400 focus:border-verde-600 focus:outline-none focus:ring-2 focus:ring-verde-600/25 dark:border-white/15 dark:bg-white/[0.05] dark:text-zinc-100 dark:placeholder:text-zinc-500;
   }
 
   .pill {
-    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide;
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide;
   }
   .pill-pendiente {
     @apply bg-amarillo-100 text-amarillo-800 dark:bg-amarillo-400/15 dark:text-amarillo-300;
   }
   .pill-pagada {
     @apply bg-verde-100 text-verde-800 dark:bg-verde-500/15 dark:text-verde-300;
+  }
+
+  /* Tarjeta-estadística del resumen de turno. */
+  .stat {
+    @apply rounded-xl border border-zinc-200/70 bg-white px-3 py-2 dark:border-white/10 dark:bg-white/[0.04];
+  }
+  .stat-rotulo {
+    @apply text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400;
+  }
+  .stat-valor {
+    @apply mt-0.5 text-lg font-black leading-none tabular;
+  }
+
+  /* Rótulo de sección (categorías de la carta, bloques del desglose). */
+  .rotulo-seccion {
+    @apply text-[11px] font-black uppercase tracking-[0.15em] text-zinc-400 dark:text-zinc-500;
   }
 }
