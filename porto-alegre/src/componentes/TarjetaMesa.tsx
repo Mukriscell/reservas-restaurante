@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { Clock, Plus, UserRound } from "lucide-react";
+import { Clock, Lock, Plus, UserRound } from "lucide-react";
 import type { Atencion, Mesa } from "../tipos";
 import { totalCuenta } from "../tipos";
 import { formatCLP } from "../util/dinero";
@@ -10,67 +10,66 @@ import {
   type EstadoVisual,
 } from "../util/estadoMesa";
 
-/** Paleta premium por estado: tarjeta-mesa, tablero, sillas e indicador. */
+/** Estilo neón por estado: anillo brillante, número y pill. */
 const ESTILO: Record<
   EstadoVisual,
   {
     card: string;
-    table: string;
+    ring: string;
+    glow: string;
     numero: string;
-    chair: string;
-    punto: string;
+    dot: string;
     pill: string;
+    pulso?: boolean;
   }
 > = {
   libre: {
-    card: "border-verde-500/25 bg-gradient-to-b from-verde-500/[0.06] to-transparent dark:border-verde-500/20 dark:from-verde-500/10",
-    table:
-      "border-verde-500/30 bg-verde-50 dark:bg-verde-500/10 dark:border-verde-400/25",
-    numero: "text-verde-700 dark:text-verde-300",
-    chair: "bg-verde-500/35 dark:bg-verde-400/30",
-    punto: "bg-verde-500",
-    pill: "bg-verde-500/12 text-verde-700 dark:bg-verde-500/15 dark:text-verde-300",
+    card: "border-verde-500/20 bg-white dark:border-verde-500/15 dark:bg-verde-500/[0.04]",
+    ring: "border-verde-400 dark:border-verde-400",
+    glow: "shadow-glow-verde",
+    numero: "text-verde-600 dark:text-verde-300",
+    dot: "bg-verde-500",
+    pill: "text-verde-700 dark:text-verde-300",
   },
   consumiendo: {
-    card: "border-amarillo-400/30 bg-gradient-to-b from-amarillo-400/[0.09] to-transparent dark:border-amarillo-400/25 dark:from-amarillo-400/10",
-    table:
-      "border-amarillo-400/40 bg-amarillo-50 dark:bg-amarillo-400/10 dark:border-amarillo-400/30",
-    numero: "text-amarillo-800 dark:text-amarillo-200",
-    chair: "bg-amarillo-400/50 dark:bg-amarillo-400/40",
-    punto: "bg-amarillo-400",
-    pill: "bg-amarillo-400/15 text-amarillo-800 dark:bg-amarillo-400/15 dark:text-amarillo-200",
+    card: "border-amarillo-400/25 bg-white dark:border-amarillo-400/15 dark:bg-amarillo-400/[0.05]",
+    ring: "border-amarillo-400",
+    glow: "shadow-glow-amarillo",
+    numero: "text-amarillo-600 dark:text-amarillo-300",
+    dot: "bg-amarillo-400",
+    pill: "text-amarillo-700 dark:text-amarillo-300",
   },
   por_pagar: {
-    card: "border-red-500/40 bg-gradient-to-b from-red-500/[0.11] to-transparent dark:border-red-500/35 dark:from-red-500/12",
-    table: "border-red-500/45 bg-red-50 dark:bg-red-500/12 dark:border-red-500/35",
-    numero: "text-red-700 dark:text-red-200",
-    chair: "bg-red-500/45 dark:bg-red-500/40",
-    punto: "bg-red-500",
-    pill: "bg-red-500/15 text-red-700 dark:bg-red-500/15 dark:text-red-200",
-  },
-  cerrada: {
-    card: "border-zinc-300/70 bg-zinc-100/50 opacity-80 dark:border-white/10 dark:bg-white/5",
-    table: "border-zinc-300 bg-zinc-100 dark:bg-white/5 dark:border-white/10",
-    numero: "text-zinc-500 dark:text-zinc-400",
-    chair: "bg-zinc-300 dark:bg-white/10",
-    punto: "bg-zinc-400",
-    pill: "bg-zinc-200 text-zinc-600 dark:bg-white/10 dark:text-zinc-300",
+    card: "border-red-500/30 bg-white dark:border-red-500/20 dark:bg-red-500/[0.06]",
+    ring: "border-red-500",
+    glow: "shadow-glow-rojo",
+    numero: "text-red-600 dark:text-red-300",
+    dot: "bg-red-500",
+    pill: "text-red-600 dark:text-red-300",
+    pulso: true,
   },
   reservada: {
-    card: "border-violet-500/35 bg-gradient-to-b from-violet-500/[0.09] to-transparent dark:border-violet-500/30 dark:from-violet-500/12",
-    table:
-      "border-violet-500/40 bg-violet-50 dark:bg-violet-500/12 dark:border-violet-400/30",
-    numero: "text-violet-700 dark:text-violet-200",
-    chair: "bg-violet-500/40 dark:bg-violet-500/35",
-    punto: "bg-violet-500",
-    pill: "bg-violet-500/15 text-violet-700 dark:bg-violet-500/15 dark:text-violet-200",
+    card: "border-violet-500/25 bg-white dark:border-violet-500/15 dark:bg-violet-500/[0.06]",
+    ring: "border-violet-400",
+    glow: "shadow-glow-violeta",
+    numero: "text-violet-600 dark:text-violet-300",
+    dot: "bg-violet-500",
+    pill: "text-violet-700 dark:text-violet-300",
+  },
+  cerrada: {
+    card: "border-zinc-300/60 bg-zinc-50 opacity-80 dark:border-white/10 dark:bg-white/[0.03]",
+    ring: "border-zinc-300 dark:border-white/20",
+    glow: "",
+    numero: "text-zinc-400 dark:text-zinc-500",
+    dot: "bg-zinc-400",
+    pill: "text-zinc-500 dark:text-zinc-400",
   },
 };
 
 /**
- * Mesa del plano de salón (POS): tablero redondo visto desde arriba con
- * sillas, número permanente al centro, total acumulado, garzón responsable
- * y tiempo en mesa. El color comunica el estado de un vistazo.
+ * Mesa del plano de salón como anillo neón (estilo POS): el color y el
+ * resplandor comunican el estado de un vistazo; número permanente al centro,
+ * total acumulado, garzón a cargo y tiempo en mesa.
  */
 export const TarjetaMesa = memo(function TarjetaMesa({
   mesa,
@@ -82,13 +81,10 @@ export const TarjetaMesa = memo(function TarjetaMesa({
   onAbrir,
 }: {
   mesa: Mesa;
-  /** Atención abierta de la mesa (null si está libre). */
   atencion: Atencion | null;
   garzonNombre: string | null;
   seleccionada: boolean;
-  /** Reloj compartido (epoch ms) para el tiempo en mesa. */
   ahora: number;
-  /** Reserva externa (futura integración con MESALISTA). */
   reservada?: boolean;
   onAbrir: (mesaId: string) => void;
 }) {
@@ -110,79 +106,63 @@ export const TarjetaMesa = memo(function TarjetaMesa({
     <button
       onClick={() => onAbrir(mesa.id)}
       aria-label={lectura}
-      className={`relative flex min-h-[156px] flex-col items-center justify-between gap-1.5 rounded-3xl border p-3 text-center shadow-suave transition active:scale-[0.97] ${e.card} ${
+      className={`relative flex min-h-[150px] flex-col items-center justify-center gap-2.5 rounded-3xl border p-3 text-center transition-all duration-150 hover:-translate-y-0.5 active:scale-[0.97] ${e.card} ${
         seleccionada
-          ? "ring-2 ring-azul-600 ring-offset-2 ring-offset-zinc-100 dark:ring-azul-400 dark:ring-offset-azul-950"
+          ? "ring-2 ring-azul-500 ring-offset-2 ring-offset-zinc-50 dark:ring-azul-400 dark:ring-offset-azul-950"
           : ""
       }`}
     >
-      {/* Encabezado: estado + tiempo en mesa */}
-      <div className="flex w-full items-center justify-between gap-1">
-        <span
-          className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${e.pill}`}
-        >
-          <span
-            className={`h-1.5 w-1.5 rounded-full ${e.punto} ${
-              estado === "por_pagar" ? "animate-pulse" : ""
-            }`}
-          />
-          {ETIQUETA_ESTADO[estado]}
+      {tiempo && (
+        <span className="absolute right-2.5 top-2.5 inline-flex items-center gap-1 text-[10px] font-bold tabular text-zinc-400 dark:text-zinc-500">
+          <Clock className="h-3 w-3" />
+          {tiempo}
         </span>
-        {tiempo && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-semibold tabular-nums text-zinc-500 dark:text-zinc-400">
-            <Clock className="h-3 w-3" />
-            {tiempo}
-          </span>
-        )}
-      </div>
+      )}
 
-      {/* Mesa vista desde arriba: tablero redondo + sillas */}
-      <span className="relative grid h-[84px] w-[84px] shrink-0 place-items-center">
-        <span
-          className={`absolute left-1/2 top-0 h-2.5 w-7 -translate-x-1/2 rounded-full ${e.chair}`}
-        />
-        <span
-          className={`absolute bottom-0 left-1/2 h-2.5 w-7 -translate-x-1/2 rounded-full ${e.chair}`}
-        />
-        <span
-          className={`absolute left-0 top-1/2 h-7 w-2.5 -translate-y-1/2 rounded-full ${e.chair}`}
-        />
-        <span
-          className={`absolute right-0 top-1/2 h-7 w-2.5 -translate-y-1/2 rounded-full ${e.chair}`}
-        />
-        <span
-          className={`relative grid h-[58px] w-[58px] place-items-center rounded-full border shadow-suave ${e.table}`}
-        >
-          {/* Brillo del tablero (apariencia de mesa real) */}
-          <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(circle_at_32%_26%,rgba(255,255,255,0.4),transparent_58%)] dark:bg-[radial-gradient(circle_at_32%_26%,rgba(255,255,255,0.13),transparent_58%)]" />
-          <span className={`relative text-2xl font-black leading-none ${e.numero}`}>
-            {mesa.numero}
-          </span>
+      {/* Anillo neón con el número */}
+      <span
+        className={`grid h-[68px] w-[68px] place-items-center rounded-full border-2 bg-white dark:bg-azul-950 ${e.ring} ${e.glow} ${
+          e.pulso ? "animate-pulse" : ""
+        }`}
+      >
+        <span className={`text-2xl font-black leading-none tabular ${e.numero}`}>
+          {mesa.numero}
         </span>
       </span>
 
-      {/* Pie: total + garzón, o pista según el estado */}
-      <div className="flex min-h-[18px] w-full items-center justify-between gap-1">
+      {/* Etiqueta de estado */}
+      <span
+        className={`inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider ${e.pill}`}
+      >
+        <span className={`h-1.5 w-1.5 rounded-full ${e.dot}`} />
+        {ETIQUETA_ESTADO[estado]}
+      </span>
+
+      {/* Pie: total + garzón / abrir / cuenta cerrada */}
+      <div className="flex min-h-[16px] w-full items-center justify-center gap-1.5">
         {activa ? (
           <>
-            <span className="text-sm font-black tabular-nums text-zinc-800 dark:text-zinc-100">
+            <span className="text-sm font-black tabular text-zinc-800 dark:text-zinc-100">
               {formatCLP(total)}
             </span>
             {garzonNombre && (
-              <span className="flex min-w-0 items-center gap-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+              <span className="flex min-w-0 items-center gap-0.5 text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
                 <UserRound className="h-3 w-3 shrink-0" />
                 <span className="truncate">{garzonNombre}</span>
               </span>
             )}
           </>
         ) : estado === "libre" ? (
-          <span className="mx-auto inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-verde-700/70 dark:text-verde-300/70">
-            <Plus className="h-3 w-3" />
-            Abrir
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-verde-600/80 dark:text-verde-400/80">
+            <Plus className="h-3 w-3" /> Abrir
+          </span>
+        ) : estado === "cerrada" ? (
+          <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+            <Lock className="h-3 w-3" /> Cerrada
           </span>
         ) : (
-          <span className="mx-auto text-[11px] font-semibold uppercase tracking-wide opacity-60">
-            {estado === "reservada" ? "Reservada" : "Cuenta cerrada"}
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-violet-500">
+            Reservada
           </span>
         )}
       </div>

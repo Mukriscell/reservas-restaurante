@@ -15,6 +15,7 @@ import { PantallaAuditoria } from "./pantallas/PantallaAuditoria";
 import { PantallaDashboard } from "./pantallas/PantallaDashboard";
 import { PantallaAcceso } from "./pantallas/PantallaAcceso";
 import { SelectorGarzon } from "./componentes/SelectorGarzon";
+import { BottomNav } from "./componentes/BottomNav";
 import { Aviso } from "./componentes/Aviso";
 
 type Vista =
@@ -35,6 +36,8 @@ function Navegacion() {
   // Última mesa abierta: se destaca en azul en la grilla.
   const [seleccionadaId, setSeleccionadaId] = useState<string | null>(null);
   const [selectorAbierto, setSelectorAbierto] = useState(false);
+  const { garzon } = useGarzonActual();
+  const esAdmin = garzon?.rol === "ADMIN";
 
   return (
     <>
@@ -45,9 +48,6 @@ function Navegacion() {
             setSeleccionadaId(mesaId);
             setVista({ tipo: "mesa", mesaId });
           }}
-          onVerHistorial={() => setVista({ tipo: "historial" })}
-          onVerAuditoria={() => setVista({ tipo: "auditoria" })}
-          onVerDashboard={() => setVista({ tipo: "dashboard" })}
           onCambiarGarzon={() => setSelectorAbierto(true)}
         />
       )}
@@ -87,6 +87,17 @@ function Navegacion() {
         <PantallaDesglose
           atencionId={vista.atencionId}
           onVolver={() => setVista(vista.desde)}
+        />
+      )}
+
+      {(vista.tipo === "mesas" ||
+        vista.tipo === "historial" ||
+        vista.tipo === "auditoria" ||
+        vista.tipo === "dashboard") && (
+        <BottomNav
+          activo={vista.tipo}
+          esAdmin={esAdmin}
+          onIr={(c) => setVista(c === "mesas" ? { tipo: "mesas" } : { tipo: c })}
         />
       )}
 

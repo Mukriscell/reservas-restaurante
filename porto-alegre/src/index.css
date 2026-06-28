@@ -82,6 +82,30 @@
     @apply mt-0.5 text-lg font-black leading-none tabular;
   }
 
+  /* Glassmorphism (login y overlays en modo oscuro). */
+  .glass {
+    @apply rounded-3xl border border-white/15 bg-white/10 shadow-suave backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.06];
+  }
+
+  /* Botón neón con gradiente + resplandor (acción principal). */
+  .btn-neon {
+    @apply bg-gradient-to-r from-verde-500 to-verde-600 text-white shadow-glow-boton hover:from-verde-400 hover:to-verde-500;
+  }
+
+  /* Barra de navegación inferior (floor plan estilo POS). */
+  .nav-inferior {
+    @apply sticky bottom-0 z-30 mt-4 flex items-center justify-around gap-1 rounded-t-2xl border-t border-zinc-200/70 bg-white/90 px-2 py-2 backdrop-blur-lg dark:border-white/10 dark:bg-azul-950/90;
+  }
+  .nav-item {
+    @apply flex flex-1 flex-col items-center gap-0.5 rounded-xl px-2 py-1.5 text-[10px] font-bold transition-colors;
+  }
+  .nav-item-activo {
+    @apply text-verde-600 dark:text-verde-400;
+  }
+  .nav-item-inactivo {
+    @apply text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300;
+  }
+
   /* Rótulo de sección. */
   .rotulo-seccion {
     @apply text-[11px] font-black uppercase tracking-[0.15em] text-zinc-400 dark:text-zinc-500;
