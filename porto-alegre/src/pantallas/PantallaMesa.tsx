@@ -264,7 +264,7 @@ function VistaCuenta({
             {puedeEditar && (
               <button
                 onClick={() => setPanel(panel === "cobrar" ? null : "cobrar")}
-                className="btn btn-verde"
+                className="btn btn-neon"
               >
                 <CheckCircle2 className="h-4 w-4" /> Cobrar mesa
               </button>
@@ -350,7 +350,7 @@ function VistaCuenta({
               <button
                 onClick={() => void cobrar()}
                 disabled={procesando}
-                className="btn btn-verde"
+                className="btn btn-neon"
               >
                 Confirmar pago
               </button>
@@ -487,7 +487,7 @@ function VistaCuenta({
                               <span className="text-sm font-semibold tabular text-zinc-500 dark:text-zinc-400">
                                 {formatCLP(p.precio)}
                               </span>
-                              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-verde-600/10 text-verde-700 transition-colors group-hover:bg-verde-600/20 dark:bg-verde-500/15 dark:text-verde-400">
+                              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-verde-600 text-white shadow-suave transition-transform group-hover:scale-110 dark:bg-verde-500">
                                 <Plus className="h-4 w-4" />
                               </span>
                             </button>
@@ -660,7 +660,7 @@ function VistaLibre({
         <button
           onClick={() => void abrir()}
           disabled={procesando || !garzon}
-          className="btn btn-verde mt-4 w-full text-base disabled:opacity-40"
+          className="btn btn-neon mt-4 w-full text-base disabled:opacity-40"
         >
           <Sparkles className="h-5 w-5" /> Abrir atención
         </button>
