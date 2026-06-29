@@ -42,12 +42,12 @@ export function PantallaDashboard({ onVolver }: { onVolver: () => void }) {
 
   return (
     <div className="mx-auto max-w-2xl px-3 pb-10">
-      <header className="sticky top-0 z-20 -mx-3 mb-4 border-b border-zinc-200/80 bg-zinc-100/95 px-3 py-3 backdrop-blur dark:border-white/10 dark:bg-azul-950/95">
+      <header className="barra-sup -mx-3 mb-4 px-3 py-3">
         <div className="flex items-center gap-2.5">
           <button
             onClick={onVolver}
             aria-label="Volver a las mesas"
-            className="btn btn-borde h-12 w-12 !px-0"
+            className="btn btn-borde btn-icono"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
@@ -58,7 +58,7 @@ export function PantallaDashboard({ onVolver }: { onVolver: () => void }) {
           <button
             onClick={() => setVersion((v) => v + 1)}
             aria-label="Actualizar"
-            className="btn btn-borde h-12 w-12 !px-0"
+            className="btn btn-borde btn-icono"
           >
             <RotateCcw className="h-4 w-4" />
           </button>
@@ -84,11 +84,11 @@ export function PantallaDashboard({ onVolver }: { onVolver: () => void }) {
 
       {/* Tarjetas resumen */}
       <div className="grid grid-cols-3 gap-2.5">
-        <div className="tarjeta p-3">
-          <p className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+        <div className="rounded-2xl border border-verde-500/25 bg-verde-50 p-3 shadow-suave dark:border-verde-500/20 dark:bg-verde-500/[0.08]">
+          <p className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wide text-verde-700/80 dark:text-verde-400/80">
             <Coins className="h-3.5 w-3.5" /> Total propinas
           </p>
-          <p className="mt-1 text-lg font-black leading-tight text-verde-700 dark:text-amarillo-400">
+          <p className="mt-1 text-lg font-black leading-tight text-verde-700 dark:text-verde-300">
             {formatCLP(resumen.totalPropinas)}
           </p>
         </div>
@@ -128,8 +128,12 @@ export function PantallaDashboard({ onVolver }: { onVolver: () => void }) {
                 <span
                   className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-black ${
                     i === 0
-                      ? "bg-amarillo-400 text-azul-950"
-                      : "bg-zinc-200 text-zinc-600 dark:bg-white/10 dark:text-zinc-300"
+                      ? "bg-amarillo-400 text-azul-950 shadow-glow-amarillo"
+                      : i === 1
+                        ? "bg-zinc-300 text-zinc-700 dark:bg-zinc-400/30 dark:text-zinc-100"
+                        : i === 2
+                          ? "bg-orange-400 text-orange-950 dark:bg-orange-500/30 dark:text-orange-200"
+                          : "bg-zinc-200 text-zinc-600 dark:bg-white/10 dark:text-zinc-300"
                   }`}
                 >
                   {i === 0 ? <Crown className="h-4 w-4" /> : i + 1}

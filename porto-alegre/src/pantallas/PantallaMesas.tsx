@@ -1,15 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  History,
-  LogOut,
-  Martini,
-  ScrollText,
-  TrendingUp,
-  UserRound,
-} from "lucide-react";
+import { LogOut, Martini, UserRound } from "lucide-react";
 import { useAcciones, useEstadoApp, useGarzonActual } from "../estado/contexto";
 import { MODO_COMPARTIDO } from "../sync/supabase";
 import { TarjetaMesa } from "../componentes/TarjetaMesa";
+import { ResumenTurno } from "../componentes/ResumenTurno";
 import { PillConexion } from "../componentes/Conexion";
 import { BotonTema } from "../componentes/BotonTema";
 import {
@@ -61,16 +55,10 @@ function ChipFiltro({
 export function PantallaMesas({
   seleccionadaId,
   onAbrirMesa,
-  onVerHistorial,
-  onVerAuditoria,
-  onVerDashboard,
   onCambiarGarzon,
 }: {
   seleccionadaId: string | null;
   onAbrirMesa: (mesaId: string) => void;
-  onVerHistorial: () => void;
-  onVerAuditoria: () => void;
-  onVerDashboard: () => void;
   onCambiarGarzon: () => void;
 }) {
   const { mesas, atenciones, garzones } = useEstadoApp();
@@ -114,7 +102,7 @@ export function PantallaMesas({
 
   return (
     <div className="mx-auto max-w-6xl px-3 pb-10">
-      <header className="sticky top-0 z-20 -mx-3 mb-4 border-b border-zinc-200/80 bg-zinc-100/95 px-3 py-3 backdrop-blur dark:border-white/10 dark:bg-azul-950/95">
+      <header className="barra-sup -mx-3 mb-4 px-3 py-3">
         <div className="flex items-center gap-3">
           <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-verde-600 text-white shadow-suave">
             <Martini className="h-6 w-6" />
@@ -139,17 +127,6 @@ export function PantallaMesas({
             <UserRound className="h-4 w-4 shrink-0" />
             <span className="truncate">{garzon?.nombre ?? "Elegir garzón"}</span>
           </button>
-          <button onClick={onVerHistorial} className="btn btn-borde">
-            <History className="h-4 w-4" /> Historial
-          </button>
-          <button onClick={onVerAuditoria} className="btn btn-borde">
-            <ScrollText className="h-4 w-4" /> Auditoría
-          </button>
-          {garzon?.rol === "ADMIN" && (
-            <button onClick={onVerDashboard} className="btn btn-borde">
-              <TrendingUp className="h-4 w-4" /> Dashboard
-            </button>
-          )}
           <span className="flex-1" />
           {MODO_COMPARTIDO && (
             <button
@@ -162,6 +139,8 @@ export function PantallaMesas({
             </button>
           )}
         </div>
+
+        <ResumenTurno atenciones={atenciones} />
 
         {/* Filtros / leyenda por estado del plano */}
         <div className="-mx-1 mt-3 flex items-center gap-1.5 overflow-x-auto px-1 pb-1">

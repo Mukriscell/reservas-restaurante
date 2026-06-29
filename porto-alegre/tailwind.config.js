@@ -50,6 +50,29 @@ export default {
       },
       boxShadow: {
         suave: "0 1px 3px rgb(16 24 64 / 0.06), 0 4px 16px rgb(16 24 64 / 0.07)",
+        realce: "0 10px 34px rgb(0 135 62 / 0.18)",
+        "glow-verde": "0 0 0 1px rgb(34 211 102 / 0.5), 0 0 18px 2px rgb(34 211 102 / 0.45)",
+        "glow-amarillo": "0 0 0 1px rgb(250 204 21 / 0.5), 0 0 18px 2px rgb(250 204 21 / 0.45)",
+        "glow-rojo": "0 0 0 1px rgb(244 63 94 / 0.5), 0 0 18px 2px rgb(244 63 94 / 0.5)",
+        "glow-violeta": "0 0 0 1px rgb(167 139 250 / 0.5), 0 0 18px 2px rgb(167 139 250 / 0.45)",
+        "glow-boton": "0 0 22px 1px rgb(34 211 102 / 0.55)",
+      },
+      keyframes: {
+        subir: {
+          "0%": { opacity: "0", transform: "translateY(8px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+        aparecer: { "0%": { opacity: "0" }, "100%": { opacity: "1" } },
+        pop: {
+          "0%": { transform: "scale(0.96)" },
+          "60%": { transform: "scale(1.02)" },
+          "100%": { transform: "scale(1)" },
+        },
+      },
+      animation: {
+        subir: "subir 0.22s cubic-bezier(0.16, 1, 0.3, 1)",
+        aparecer: "aparecer 0.18s ease-out",
+        pop: "pop 0.18s ease-out",
       },
     },
   },

@@ -96,12 +96,12 @@ function Encabezado({
   children?: React.ReactNode;
 }) {
   return (
-    <header className="sticky top-0 z-20 -mx-3 mb-4 border-b border-zinc-200/80 bg-zinc-100/95 px-3 py-3 backdrop-blur dark:border-white/10 dark:bg-azul-950/95">
+    <header className="barra-sup -mx-3 mb-4 px-3 py-3">
       <div className="flex items-center gap-2.5">
         <button
           onClick={onVolver}
           aria-label="Volver a las mesas"
-          className="btn btn-borde h-12 w-12 !px-0"
+          className="btn btn-borde btn-icono"
         >
           <ArrowLeft className="h-5 w-5" />
         </button>
@@ -244,7 +244,7 @@ function VistaCuenta({
             </p>
             <p
               data-testid="total-mesa"
-              className="text-3xl font-black leading-tight text-verde-700 dark:text-amarillo-400"
+              className="text-3xl font-black leading-tight tabular text-verde-700 dark:text-amarillo-400"
             >
               {formatCLP(atencion.totalAbonos > 0 ? saldo : total)}
             </p>
@@ -264,7 +264,7 @@ function VistaCuenta({
             {puedeEditar && (
               <button
                 onClick={() => setPanel(panel === "cobrar" ? null : "cobrar")}
-                className="btn btn-verde"
+                className="btn btn-neon"
               >
                 <CheckCircle2 className="h-4 w-4" /> Cobrar mesa
               </button>
@@ -350,7 +350,7 @@ function VistaCuenta({
               <button
                 onClick={() => void cobrar()}
                 disabled={procesando}
-                className="btn btn-verde"
+                className="btn btn-neon"
               >
                 Confirmar pago
               </button>
@@ -449,7 +449,7 @@ function VistaCuenta({
           <h2 className="mb-2 text-sm font-bold text-verde-700 dark:text-verde-400">
             Carta
           </h2>
-          <div className="max-h-[46vh] overflow-y-auto pr-1 lg:max-h-[62vh]">
+          <div className="scroll-fino max-h-[46vh] overflow-y-auto pr-1 lg:max-h-[62vh]">
             {resultados.length === 0 ? (
               <p className="py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
                 Sin resultados para “{consulta}”.
@@ -474,7 +474,7 @@ function VistaCuenta({
                               onClick={() =>
                                 acciones.agregarProducto(atencion.id, p.id)
                               }
-                              className="flex min-h-12 w-full items-center gap-2 rounded-xl px-2 py-2.5 text-left transition hover:bg-zinc-100 active:bg-zinc-200 dark:hover:bg-white/10 dark:active:bg-white/15"
+                              className="group flex min-h-12 w-full items-center gap-2 rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-zinc-100 active:bg-zinc-200 dark:hover:bg-white/10 dark:active:bg-white/15"
                             >
                               <span className="min-w-0 flex-1 truncate text-sm font-medium">
                                 {p.nombre}
@@ -484,10 +484,10 @@ function VistaCuenta({
                                   </span>
                                 )}
                               </span>
-                              <span className="text-sm font-semibold text-zinc-500 dark:text-zinc-400">
+                              <span className="text-sm font-semibold tabular text-zinc-500 dark:text-zinc-400">
                                 {formatCLP(p.precio)}
                               </span>
-                              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-verde-600/10 text-verde-700 dark:bg-verde-500/15 dark:text-verde-400">
+                              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-verde-600 text-white shadow-suave transition-transform group-hover:scale-110 dark:bg-verde-500">
                                 <Plus className="h-4 w-4" />
                               </span>
                             </button>
@@ -600,7 +600,7 @@ function VistaLibre({
       />
 
       {recibo && (
-        <div className="tarjeta mb-4 border-verde-300 p-4 dark:border-verde-500/30">
+        <div className="tarjeta animate-subir mb-4 border-verde-300 p-4 dark:border-verde-500/30">
           <p className="flex items-center gap-2 text-sm font-bold text-verde-800 dark:text-verde-300">
             <Lock className="h-4 w-4" /> Atención #{recibo.numero} cobrada: la
             cuenta pasó al historial y la mesa quedó libre.
@@ -645,7 +645,7 @@ function VistaLibre({
         </div>
       )}
 
-      <div className="tarjeta p-5 text-center">
+      <div className="tarjeta animate-subir p-5 text-center">
         <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-verde-600/10 text-verde-700 dark:bg-verde-500/15 dark:text-verde-400">
           <DoorOpen className="h-7 w-7" />
         </span>
@@ -660,7 +660,7 @@ function VistaLibre({
         <button
           onClick={() => void abrir()}
           disabled={procesando || !garzon}
-          className="btn btn-verde mt-4 w-full text-base disabled:opacity-40"
+          className="btn btn-neon mt-4 w-full text-base disabled:opacity-40"
         >
           <Sparkles className="h-5 w-5" /> Abrir atención
         </button>

@@ -133,12 +133,12 @@ export function PantallaAuditoria({ onVolver }: { onVolver: () => void }) {
 
   return (
     <div className="mx-auto max-w-2xl px-3 pb-10">
-      <header className="sticky top-0 z-20 -mx-3 mb-4 border-b border-zinc-200/80 bg-zinc-100/95 px-3 py-3 backdrop-blur dark:border-white/10 dark:bg-azul-950/95">
+      <header className="barra-sup -mx-3 mb-4 px-3 py-3">
         <div className="flex items-center gap-2.5">
           <button
             onClick={onVolver}
             aria-label="Volver a las mesas"
-            className="btn btn-borde h-12 w-12 !px-0"
+            className="btn btn-borde btn-icono"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
@@ -149,7 +149,7 @@ export function PantallaAuditoria({ onVolver }: { onVolver: () => void }) {
           <button
             onClick={() => setVersion((v) => v + 1)}
             aria-label="Actualizar"
-            className="btn btn-borde h-12 w-12 !px-0"
+            className="btn btn-borde btn-icono"
           >
             <RotateCcw className="h-4 w-4" />
           </button>

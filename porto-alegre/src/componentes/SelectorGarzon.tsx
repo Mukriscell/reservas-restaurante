@@ -91,7 +91,7 @@ export function SelectorGarzon({
       aria-modal="true"
       aria-label="Elegir garzón"
     >
-      <div className="tarjeta w-full max-w-md p-5 dark:bg-[#1b2342]">
+      <div className="glass w-full max-w-md p-5">
         <div className="flex items-center gap-2">
           <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-verde-600 text-white">
             <UserRound className="h-5 w-5" />
@@ -117,7 +117,7 @@ export function SelectorGarzon({
           )}
         </div>
 
-        <ul className="mt-4 max-h-[45vh] space-y-2 overflow-y-auto pr-1">
+        <ul className="scroll-fino mt-4 max-h-[45vh] space-y-2 overflow-y-auto pr-1">
           {activos.map((g) =>
             editandoId === g.id ? (
               <li
